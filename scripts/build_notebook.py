@@ -307,8 +307,11 @@ elif DRIVE_PATH and not any(ROOTS_WORKSPACE.iterdir()):
     ws_backup = Path(DRIVE_PATH) / "workspace"
     if ws_backup.exists() and any(ws_backup.iterdir()):
         print("📥 [6/8] Restaurando workspace do Drive…")
-        sh(f"rsync -a --exclude=.git --exclude=node_modules --exclude=__pycache__ --exclude='*.log' --exclude=.env '{ws_backup}/' '{ROOTS_WORKSPACE}/'")
-        print("   ✅ workspace restaurado do Drive")
+        r = sh(f"rsync -a --exclude=.git --exclude=node_modules --exclude=__pycache__ --exclude='*.log' --exclude=.env '{ws_backup}/' '{ROOTS_WORKSPACE}/'")
+        if r.returncode == 0:
+            print("   ✅ workspace restaurado do Drive")
+        else:
+            print("   ⚠️  restore do workspace FALHOU — os arquivos locais ficaram como estão")
     else:
         print("   ℹ️  [6/8] Workspace vazio e sem backup no Drive — começando do zero")
 else:

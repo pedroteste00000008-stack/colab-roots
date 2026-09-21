@@ -124,9 +124,13 @@ if [ -d "$DRIVE_PATH" ]; then
         if [ ! -d /content/workspace ] || [ -z "$(find /content/workspace -mindepth 1 -maxdepth 1 2>/dev/null | head -1)" ]; then
             echo "   📥 Workspace local vazio — restaurando do backup…"
             mkdir -p /content/workspace
-            rsync -a --exclude=.git --exclude=node_modules --exclude=__pycache__ --exclude='*.log' --exclude=.env \
-                "$DRIVE_PATH/workspace/" /content/workspace/
-            echo "   ✅ Workspace restaurado"
+            if rsync -a --exclude=.git --exclude=node_modules --exclude=__pycache__ --exclude='*.log' --exclude=.env \
+                "$DRIVE_PATH/workspace/" /content/workspace/; then
+                echo "   ✅ Workspace restaurado"
+            else
+                echo "   ❌ Restore do workspace FALHOU — veja o erro acima"
+                exit 1
+            fi
         else
             echo "   ⏭️  Workspace local já tem conteúdo — mantendo (não sobrescreve)"
         fi

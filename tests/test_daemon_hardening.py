@@ -7,6 +7,7 @@ restart/backoff, kill, secrets no state, keep-alive, socket.
 """
 import os
 import sys
+import json
 import shutil
 import socket
 import tempfile
@@ -125,6 +126,7 @@ def test_daemon_lifecycle():
             "enable_ttyd": False, "enable_vscode_tunnel": False,
             "persist_to_drive": False, "keep_alive": False,
         })
+        d.logger = mock.Mock()  # capture qualquer log de erro
         assert d.start_background() is True
         for cmd in ["status", "doctor", "help", "urls", "password", "sync"]:
             r = d._execute_command(cmd)
@@ -132,6 +134,10 @@ def test_daemon_lifecycle():
         d._shutdown()
         assert not d._running
         assert not d.lock_file.path.exists()
+        # Nenhum erro de persistência/raça durante o ciclo de vida real
+        assert d.logger.error.call_count == 0, (
+            f"erros durante lifecycle: {d.logger.error.call_args_list}"
+        )
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
@@ -329,6 +335,52 @@ def test_socket_rejects_oversized_command():
         shutil.rmtree(tmp, ignore_errors=True)
 
 
+def test_save_services_concurrent_writers():
+    tmp = tempfile.mkdtemp()
+    try:
+        d = _daemon(tmp, enable_code_server=True, enable_ttyd=True)
+        d._services.set("code-server", "status", "running")
+        d._services.set("ttyd", "status", "stopped")
+        d.logger = mock.Mock()  # qualquer erro de persistência vira falha
+
+        # Alarga a janela da race: atrasa o replace, forçando colisão no
+        # tmp compartilhado (bug antigo) se ele voltar a existir.
+        orig_replace = Path.replace
+        def slow_replace(self, target):
+            time.sleep(0.001)
+            return orig_replace(self, target)
+
+        errors = []
+        def writer(_):
+            try:
+                for _ in range(20):
+                    d._save_services()
+            except Exception as e:  # noqa: BLE001
+                errors.append(e)
+
+        with mock.patch("pathlib.Path.replace", slow_replace):
+            threads = [threading.Thread(target=writer, args=(i,)) for i in range(8)]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join()
+
+        assert not errors, f"exceptions: {errors}"
+        assert d.logger.error.call_count == 0, (
+            f"erros de persistência: {d.logger.error.call_args_list}"
+        )
+        # services.json continua JSON válido e sem segredos
+        sf = Path(tmp) / "state" / "services.json"
+        assert sf.exists()
+        data = json.loads(sf.read_text())
+        assert data["code-server"]["status"] == "running"
+        assert data["ttyd"]["status"] == "stopped"
+        raw = sf.read_text()
+        assert "password" not in raw and '"pid"' not in raw
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 def test_logs_command_accepts_daemon():
     tmp = tempfile.mkdtemp()
     try:
@@ -364,6 +416,7 @@ if __name__ == "__main__":
         ("start-missing-binary", test_start_service_missing_binary_marks_error),
         ("start-already-running", test_start_service_already_running_skips),
         ("state-no-secrets", test_save_services_excludes_secrets_and_pids),
+        ("save-concurrent", test_save_services_concurrent_writers),
         ("keepalive", test_keepalive_writes_heartbeat),
         ("port-detect", test_port_detection),
         ("socket-evil", test_socket_rejects_evil_command),

@@ -114,6 +114,7 @@ class ColabRootsDaemon:
 
         self._running = False
         self._services = ServiceState()
+        self._save_lock = threading.Lock()  # serializa writers de services.json
         self._processes = {}  # name -> subprocess.Popen (NOT serialized)
         self._threads = []
         self._shutdown_event = threading.Event()
@@ -883,10 +884,16 @@ Commands:
             return "unknown"
 
     def _save_services(self):
-        """Persist service state to disk (no secrets, no PIDs)."""
+        """Persist service state to disk (no secrets, no PIDs).
+
+        Concurrency-safe: takes a consistent deep snapshot of ServiceState,
+        serializes writers via _save_lock and uses a per-writer unique temp
+        file + atomic os.replace — concurrent health-checker and
+        start_background() saves can no longer collide on a shared .tmp.
+        """
+        snapshot = self._services.snapshot()
         state = {}
-        for name in self._services.all_names():
-            svc = self._services.get(name)
+        for name, svc in snapshot.items():
             state[name] = {
                 "enabled": svc.get("enabled"),
                 "status": svc.get("status"),
@@ -896,9 +903,12 @@ Commands:
             }
         try:
             self.roots_state.mkdir(parents=True, exist_ok=True)
-            tmp = self.services_file.with_suffix(".tmp")
-            tmp.write_text(json.dumps(state, indent=2))
-            tmp.replace(self.services_file)
+            with self._save_lock:
+                tmp = self.services_file.with_suffix(
+                    f".{os.getpid()}.{threading.get_ident()}.tmp"
+                )
+                tmp.write_text(json.dumps(state, indent=2))
+                tmp.replace(self.services_file)
         except Exception as e:
             self.logger.error(f"Failed to save state: {e}")
 
