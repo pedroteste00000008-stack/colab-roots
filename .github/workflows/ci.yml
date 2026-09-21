@@ -1,0 +1,69 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: No placeholder links in docs
+        run: |
+          if grep -rnE "your-user|your-org|your-account|REPLACE_ME|CHANGE_ME|<owner>|<user>|github/[A-Za-z0-9-]*your-" README.md docs/ scripts/ bootstrap/; then
+            echo "❌ Placeholder encontrado nos docs/scripts — corrija antes do merge"
+            exit 1
+          fi
+          echo "OK — sem placeholders"
+
+      - name: Compile daemon
+        run: python3 -m py_compile src/daemon.py
+
+      - name: Run daemon hardening tests
+        run: python3 tests/test_daemon_hardening.py
+
+      - name: Rebuild notebook from source of truth
+        run: python3 scripts/build_notebook.py
+
+      - name: Notebook is up to date (no drift)
+        run: git diff --exit-code -- notebook/colab_roots.ipynb
+
+      - name: All notebook code cells compile
+        run: |
+          python3 - <<'EOF'
+          import json
+          nb = json.load(open("notebook/colab_roots.ipynb"))
+          for i, c in enumerate(nb["cells"]):
+              if c["cell_type"] == "code":
+                  compile("".join(c["source"]), f"<cell {i}>", "exec")
+          print(f"OK — {len(nb['cells'])} cells compilam")
+          EOF
+
+      - name: Notebook is a valid nbformat 4 document
+        run: |
+          python3 - <<'EOF'
+          import json
+          nb = json.load(open("notebook/colab_roots.ipynb"))
+          assert nb.get("nbformat") == 4
+          assert len([c for c in nb["cells"] if c["cell_type"] == "code"]) >= 5
+          print("OK — nbformat 4 válido")
+          EOF
+
+  lint-shell:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Shell syntax check
+        run: |
+          set -e
+          for f in scripts/roots bootstrap/install.sh bootstrap/restore.sh; do
+            bash -n "$f"
+            echo "OK $f"
+          done

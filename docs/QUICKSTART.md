@@ -4,7 +4,7 @@
 
 1. Open the notebook in Colab with the badge below:
 
-[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/your-user/colab-roots/blob/main/notebook/colab_roots.ipynb)
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/pedroteste00000008-stack/colab-roots/blob/main/notebook/colab_roots.ipynb)
 
 2. Press **Runtime ▸ Run all**
 3. Wait 2–4 minutes while the VM is prepared
@@ -82,8 +82,9 @@ For quick public access:
 If you lose connection but the Colab VM is still running:
 
 1. Go back to the Colab notebook
-2. Run the "Check Status & Get URLs" cell
+2. Run the 🔄 **RE-LINK** cell (regenerates proxy links — no reinstall)
 3. Use the displayed URLs and credentials
+4. 📊 **STATUS** cell shows what's running and the heartbeat age
 
 ## Troubleshooting
 

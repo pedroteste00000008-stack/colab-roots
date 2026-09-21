@@ -96,7 +96,7 @@ class LockFile:
 class ColabRootsDaemon:
     """Manages all Colab Roots services with health monitoring and auto-restart."""
 
-    VERSION = "2.0.0"
+    VERSION = "2.1.0"
     MAX_RESTARTS = 5
     HEALTH_CHECK_INTERVAL = 15
     STABLE_RESET_AFTER = 300  # Reset restart counter after 5 min uptime
@@ -114,6 +114,7 @@ class ColabRootsDaemon:
 
         self._running = False
         self._services = ServiceState()
+        self._save_lock = threading.Lock()  # serializa writers de services.json
         self._processes = {}  # name -> subprocess.Popen (NOT serialized)
         self._threads = []
         self._shutdown_event = threading.Event()
@@ -525,9 +526,8 @@ class ColabRootsDaemon:
         time.sleep(2 ** min(restart_count, 4))  # Exponential backoff: 1s, 2s, 4s, 8s, 16s
 
         if self._start_service(name):
-            self._services.set(name, "restart_count", restart_count + 1)
-        else:
-            self._services.set(name, "restart_count", restart_count + 1)
+            self.logger.info(f"  ✅ {name} restarted")
+        self._services.set(name, "restart_count", restart_count + 1)
 
     # ─── Keep-Alive ───────────────────────────────────────────────
 
@@ -676,16 +676,18 @@ class ColabRootsDaemon:
                 conn.sendall(f"Unknown command: {cmd}\n".encode("utf-8"))
                 return
 
-            # Validate service name argument
+            # Validate service name argument (logs also accepts "daemon")
             if cmd in ("restart", "stop", "start", "logs"):
                 if not arg:
                     conn.sendall(f"Usage: {cmd} <service>\n".encode("utf-8"))
                     return
                 # Sanitize service name
                 arg = "".join(c for c in arg if c.isalnum() or c in "-_")[:32]
-                if arg not in self._services.all_names():
-                    valid = ", ".join(self._services.all_names())
-                    conn.sendall(f"Unknown service: {arg}\nValid: {valid}\n".encode("utf-8"))
+                valid = set(self._services.all_names())
+                if cmd == "logs":
+                    valid.add("daemon")
+                if arg not in valid:
+                    conn.sendall(f"Unknown service: {arg}\nValid: {', '.join(sorted(valid))}\n".encode("utf-8"))
                     return
 
             # Execute command
@@ -704,15 +706,17 @@ class ColabRootsDaemon:
 
     def _execute_command(self, cmd: str, arg: str = "") -> str:
         """Execute a validated command."""
-        # Validate service name for commands that need one
+        # Validate service name for commands that need one (logs also accepts "daemon")
         if cmd in ("restart", "stop", "start", "logs"):
             if not arg:
                 return f"Usage: {cmd} <service>\n"
             # Sanitize and whitelist
             arg = "".join(c for c in arg if c.isalnum() or c in "-_")[:32]
-            if arg not in self._services.all_names():
-                valid = ", ".join(self._services.all_names())
-                return f"Unknown service: {arg}\nValid: {valid}\n"
+            valid = set(self._services.all_names())
+            if cmd == "logs":
+                valid.add("daemon")
+            if arg not in valid:
+                return f"Unknown service: {arg}\nValid: {', '.join(sorted(valid))}\n"
 
         dispatch = {
             "status": lambda: self._cmd_status(),
@@ -795,7 +799,7 @@ class ColabRootsDaemon:
         return f"▶️  {name} {'started' if ok else 'start failed'}"
 
     def _cmd_logs(self, name: str) -> str:
-        log_path = self.roots_logs / f"{name}.log"
+        log_path = self.roots_logs / "daemon.log" if name == "daemon" else self.roots_logs / f"{name}.log"
         if log_path.exists():
             try:
                 lines = log_path.read_text(errors="replace").strip().split("\n")
@@ -807,12 +811,16 @@ class ColabRootsDaemon:
     def _cmd_urls(self) -> str:
         lines = []
         if self.config.get("enable_code_server"):
-            lines.append("🖥️  code-server: http://127.0.0.1:8080")
+            lines.append("🖥️  code-server: http://127.0.0.1:8080 (local)")
         if self.config.get("enable_ttyd"):
-            lines.append("💻 ttyd:         http://127.0.0.1:7681")
+            lines.append("💻 ttyd:         http://127.0.0.1:7681 (local)")
         if self.config.get("enable_vscode_tunnel"):
             tn = self.config.get("tunnel_name", "colab-roots")
             lines.append(f"🔧 VS Code:     Remote Tunnel '{tn}'")
+        if lines:
+            lines.append("")
+            lines.append("⚠️  Local links work only inside the VM. For browser access")
+            lines.append("    use the notebook's 🔄 RE-LINK cell (Colab proxy) or 🌐 Cloudflare cell.")
         return "\n".join(lines) if lines else "No services enabled"
 
     def _cmd_password(self) -> str:
@@ -850,7 +858,7 @@ Commands:
   restart <svc>   Restart a service
   stop <svc>      Stop a service
   start <svc>     Start a service
-  logs <svc>      View service logs (last 50 lines)
+  logs <svc>      View service logs (last 50 lines; daemon = own log)
   urls            Show access URLs
   password        Show password (masked)
   sync            Force Drive sync
@@ -876,10 +884,16 @@ Commands:
             return "unknown"
 
     def _save_services(self):
-        """Persist service state to disk (no secrets, no PIDs)."""
+        """Persist service state to disk (no secrets, no PIDs).
+
+        Concurrency-safe: takes a consistent deep snapshot of ServiceState,
+        serializes writers via _save_lock and uses a per-writer unique temp
+        file + atomic os.replace — concurrent health-checker and
+        start_background() saves can no longer collide on a shared .tmp.
+        """
+        snapshot = self._services.snapshot()
         state = {}
-        for name in self._services.all_names():
-            svc = self._services.get(name)
+        for name, svc in snapshot.items():
             state[name] = {
                 "enabled": svc.get("enabled"),
                 "status": svc.get("status"),
@@ -888,9 +902,13 @@ Commands:
                 "health_failures": svc.get("health_failures", 0),
             }
         try:
-            tmp = self.services_file.with_suffix(".tmp")
-            tmp.write_text(json.dumps(state, indent=2))
-            tmp.replace(self.services_file)
+            self.roots_state.mkdir(parents=True, exist_ok=True)
+            with self._save_lock:
+                tmp = self.services_file.with_suffix(
+                    f".{os.getpid()}.{threading.get_ident()}.tmp"
+                )
+                tmp.write_text(json.dumps(state, indent=2))
+                tmp.replace(self.services_file)
         except Exception as e:
             self.logger.error(f"Failed to save state: {e}")
 
@@ -965,7 +983,7 @@ Commands:
   restart <service>   Restart a service (code-server/ttyd/vscode-tunnel)
   stop <service>      Stop a service
   start <service>     Start a service
-  logs <service>      View service logs (last 50 lines)
+  logs <service>      View service logs (also: daemon)
   urls                Show access URLs
   password            Show password (masked)
   sync                Force Drive sync

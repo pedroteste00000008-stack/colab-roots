@@ -5,7 +5,7 @@
 
 set -euo pipefail
 
-VERSION="2.0.0"
+VERSION="2.1.0"
 ROOTS_HOME="${ROOTS_HOME:-$HOME/.colab-roots}"
 ROOTS_BIN="$ROOTS_HOME/bin"
 ROOTS_LOGS="$ROOTS_HOME/logs"

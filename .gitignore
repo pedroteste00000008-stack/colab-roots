@@ -46,5 +46,8 @@ build/
 # Node
 node_modules/
 
+# Nested foreign repo (jev router lives in this workspace, not part of colab-roots)
+opjev/
+
 # Temporary
 /tmp/
