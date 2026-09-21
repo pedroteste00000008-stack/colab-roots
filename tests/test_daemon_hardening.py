@@ -329,6 +329,24 @@ def test_socket_rejects_oversized_command():
         shutil.rmtree(tmp, ignore_errors=True)
 
 
+def test_logs_command_accepts_daemon():
+    tmp = tempfile.mkdtemp()
+    try:
+        d = _daemon(tmp)
+        (Path(tmp) / "logs" / "daemon.log").write_text("linha1\nlinha2\n")
+        r = d._execute_command("logs", "daemon")
+        assert "linha2" in r, f"logs daemon should read daemon.log, got: {r!r}"
+        # restart/stop NÃO aceitam "daemon" (só logs)
+        r2 = d._execute_command("stop", "daemon")
+        assert "Unknown service" in r2
+        # validação também vale no socket
+        conn = _FakeConn(b"logs daemon\n")
+        d._handle_client(conn)
+        assert b"linha2" in conn.sent
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 if __name__ == "__main__":
     tests = [
         ("thread-safety", test_service_state_thread_safety),
@@ -350,6 +368,7 @@ if __name__ == "__main__":
         ("port-detect", test_port_detection),
         ("socket-evil", test_socket_rejects_evil_command),
         ("socket-oversize", test_socket_rejects_oversized_command),
+        ("logs-daemon", test_logs_command_accepts_daemon),
     ]
     n = len(tests)
     failed = 0

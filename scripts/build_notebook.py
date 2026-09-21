@@ -168,7 +168,7 @@ C3 = r"""## ▶️ INICIAR TUDO — um clique e pronto
 **Rode a célula abaixo.** Ela vai:
 
 1. Instalar tudo (2–4 min, siga o progresso)
-2. Montar o Google Drive (aceite a autorização — pode rodar **sem** ela também)
+2. Montar o Google Drive e **restaurar seu workspace + pacotes salvos** (aceite a autorização — dá para rodar **sem** o Drive também)
 3. Subir os serviços + daemon de backup
 4. Imprimir seus **links do IDE e do Terminal** (funcionam de verdade no navegador)
 5. **Manter a VM viva** (fica piscando 💓 — é normal, deixe quieto)
@@ -288,7 +288,7 @@ if PERSIST_TO_DRIVE:
     else:
         print("   ⚠️ Sem Drive — rodando sem persistência")
 
-# ━━━ 6/8 Workspace (repo opcional) ━━━━━━━━━━━━━━━━━━━━━━━━
+# ━━━ 6/8 Workspace (repo opcional ou restauração do Drive) ━
 WORKSPACE_REPO = os.environ.get("ROOTS_WORKSPACE_REPO", "").strip()
 if WORKSPACE_REPO:
     print("📥 [6/8] Clonando workspace…")
@@ -301,7 +301,18 @@ if WORKSPACE_REPO:
         branch = os.environ.get("ROOTS_WORKSPACE_BRANCH", "main")
         if sh(f"git clone --branch {branch} {WORKSPACE_REPO} {ROOTS_WORKSPACE}", check=False).returncode != 0:
             sh(f"git clone {WORKSPACE_REPO} {ROOTS_WORKSPACE}", check=False)
-    print("   ✅ workspace pronto")
+    print("   ✅ workspace pronto (repo)")
+elif DRIVE_PATH and not any(ROOTS_WORKSPACE.iterdir()):
+    # Restauração com semântica segura: SÓ quando o local está vazio
+    ws_backup = Path(DRIVE_PATH) / "workspace"
+    if ws_backup.exists() and any(ws_backup.iterdir()):
+        print("📥 [6/8] Restaurando workspace do Drive…")
+        sh(f"rsync -a --exclude=.git --exclude=node_modules --exclude=__pycache__ --exclude='*.log' --exclude=.env '{ws_backup}/' '{ROOTS_WORKSPACE}/'")
+        print("   ✅ workspace restaurado do Drive")
+    else:
+        print("   ℹ️  [6/8] Workspace vazio e sem backup no Drive — começando do zero")
+else:
+    print("   ℹ️  [6/8] Workspace já tem conteúdo — mantendo (nunca sobrescreve)")
 
 # ━━━ 7/8 Daemon + serviços ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 print("🤖 [7/8] Daemon + serviços…")

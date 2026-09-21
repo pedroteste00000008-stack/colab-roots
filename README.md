@@ -115,8 +115,9 @@ Colab Roots uses a multi-layer persistence strategy:
 2. **Google Drive sync**: Background sync via rsync to the mounted Drive
    folder (daemon runs it every 10 minutes)
 3. **State file**: Service state + heartbeat (`~/.colab-roots/state`)
-4. **Auto-restore**: On reconnect, the START cell restores your workspace and
-   saved packages from Drive
+4. **Auto-restore**: On a fresh VM, the START cell restores your workspace from
+   Drive (only when local is empty — never overwrites) and reinstalls saved
+   packages
 5. **Keep-alive**: Prevents idle timeouts (START cell loop + daemon heartbeat)
 
 ### What gets persisted:

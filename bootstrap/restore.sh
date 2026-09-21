@@ -118,6 +118,19 @@ if [ -d "$DRIVE_PATH" ]; then
     if [ -f "$DRIVE_PATH/requirements.txt" ]; then
         echo "   📦 Found saved packages (run 'pip install -r $DRIVE_PATH/requirements.txt' to restore)"
     fi
+
+    # Restore workspace — safe semantics: ONLY when the local one is empty
+    if [ -d "$DRIVE_PATH/workspace" ] && [ -n "$(find "$DRIVE_PATH/workspace" -mindepth 1 -maxdepth 1 2>/dev/null | head -1)" ]; then
+        if [ ! -d /content/workspace ] || [ -z "$(find /content/workspace -mindepth 1 -maxdepth 1 2>/dev/null | head -1)" ]; then
+            echo "   📥 Workspace local vazio — restaurando do backup…"
+            mkdir -p /content/workspace
+            rsync -a --exclude=.git --exclude=node_modules --exclude=__pycache__ --exclude='*.log' --exclude=.env \
+                "$DRIVE_PATH/workspace/" /content/workspace/
+            echo "   ✅ Workspace restaurado"
+        else
+            echo "   ⏭️  Workspace local já tem conteúdo — mantendo (não sobrescreve)"
+        fi
+    fi
 else
     echo "☁️  No Drive backup found"
 fi

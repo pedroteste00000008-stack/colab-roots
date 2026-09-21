@@ -15,6 +15,14 @@ jobs:
         with:
           python-version: "3.11"
 
+      - name: No placeholder links in docs
+        run: |
+          if grep -rnE "your-user|your-org|your-account|REPLACE_ME|CHANGE_ME|<owner>|<user>|github/[A-Za-z0-9-]*your-" README.md docs/ scripts/ bootstrap/; then
+            echo "❌ Placeholder encontrado nos docs/scripts — corrija antes do merge"
+            exit 1
+          fi
+          echo "OK — sem placeholders"
+
       - name: Compile daemon
         run: python3 -m py_compile src/daemon.py
 

@@ -4,7 +4,7 @@
 
 1. Open the notebook in Colab with the badge below:
 
-[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/your-user/colab-roots/blob/main/notebook/colab_roots.ipynb)
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/pedroteste00000008-stack/colab-roots/blob/main/notebook/colab_roots.ipynb)
 
 2. Press **Runtime ▸ Run all**
 3. Wait 2–4 minutes while the VM is prepared

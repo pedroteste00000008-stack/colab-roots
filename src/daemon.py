@@ -675,16 +675,18 @@ class ColabRootsDaemon:
                 conn.sendall(f"Unknown command: {cmd}\n".encode("utf-8"))
                 return
 
-            # Validate service name argument
+            # Validate service name argument (logs also accepts "daemon")
             if cmd in ("restart", "stop", "start", "logs"):
                 if not arg:
                     conn.sendall(f"Usage: {cmd} <service>\n".encode("utf-8"))
                     return
                 # Sanitize service name
                 arg = "".join(c for c in arg if c.isalnum() or c in "-_")[:32]
-                if arg not in self._services.all_names():
-                    valid = ", ".join(self._services.all_names())
-                    conn.sendall(f"Unknown service: {arg}\nValid: {valid}\n".encode("utf-8"))
+                valid = set(self._services.all_names())
+                if cmd == "logs":
+                    valid.add("daemon")
+                if arg not in valid:
+                    conn.sendall(f"Unknown service: {arg}\nValid: {', '.join(sorted(valid))}\n".encode("utf-8"))
                     return
 
             # Execute command
@@ -703,15 +705,17 @@ class ColabRootsDaemon:
 
     def _execute_command(self, cmd: str, arg: str = "") -> str:
         """Execute a validated command."""
-        # Validate service name for commands that need one
+        # Validate service name for commands that need one (logs also accepts "daemon")
         if cmd in ("restart", "stop", "start", "logs"):
             if not arg:
                 return f"Usage: {cmd} <service>\n"
             # Sanitize and whitelist
             arg = "".join(c for c in arg if c.isalnum() or c in "-_")[:32]
-            if arg not in self._services.all_names():
-                valid = ", ".join(self._services.all_names())
-                return f"Unknown service: {arg}\nValid: {valid}\n"
+            valid = set(self._services.all_names())
+            if cmd == "logs":
+                valid.add("daemon")
+            if arg not in valid:
+                return f"Unknown service: {arg}\nValid: {', '.join(sorted(valid))}\n"
 
         dispatch = {
             "status": lambda: self._cmd_status(),
@@ -794,7 +798,7 @@ class ColabRootsDaemon:
         return f"▶️  {name} {'started' if ok else 'start failed'}"
 
     def _cmd_logs(self, name: str) -> str:
-        log_path = self.roots_logs / f"{name}.log"
+        log_path = self.roots_logs / "daemon.log" if name == "daemon" else self.roots_logs / f"{name}.log"
         if log_path.exists():
             try:
                 lines = log_path.read_text(errors="replace").strip().split("\n")
@@ -853,7 +857,7 @@ Commands:
   restart <svc>   Restart a service
   stop <svc>      Stop a service
   start <svc>     Start a service
-  logs <svc>      View service logs (last 50 lines)
+  logs <svc>      View service logs (last 50 lines; daemon = own log)
   urls            Show access URLs
   password        Show password (masked)
   sync            Force Drive sync
@@ -969,7 +973,7 @@ Commands:
   restart <service>   Restart a service (code-server/ttyd/vscode-tunnel)
   stop <service>      Stop a service
   start <service>     Start a service
-  logs <service>      View service logs (last 50 lines)
+  logs <service>      View service logs (also: daemon)
   urls                Show access URLs
   password            Show password (masked)
   sync                Force Drive sync
