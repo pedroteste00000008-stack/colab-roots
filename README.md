@@ -19,7 +19,7 @@ Google Colab VMs are ephemeral by design — they disappear when you disconnect 
 | tmux session persistence | ✅ | ❌ | ✅ |
 | Service daemon (process mgmt) | Go binary | ❌ | ✅ Python daemon |
 | Auto-restore on reconnect | Partial | ❌ | ✅ |
-| Google Drive persistence | ❌ | ❌ | ✅ (rclone sync) |
+| Google Drive persistence | ❌ | ❌ | ✅ (Drive mount + rsync) |
 | Keep-alive (idle prevention) | ❌ | ❌ | ✅ (multi-layer) |
 | Health monitoring + self-heal | Basic | ❌ | ✅ |
 | SSH fallback (cloudflared) | N/A | ✅ | ✅ (optional) |
@@ -43,12 +43,12 @@ Google Colab VMs are ephemeral by design — they disappear when you disconnect 
 │  │  • Auto-restart on crash                      │  │
 │  │  • Health checks                              │  │
 │  │  • Keep-alive heartbeat                       │  │
-│  │  • Drive sync (rclone)                        │  │
+│  │  • Drive sync (rsync)                        │  │
 │  └────┬──────────────┬────────────────┬──────────┘  │
 │       │              │                │              │
 │  ┌────┴─────┐  ┌─────┴────┐  ┌───────┴──────────┐  │
 │  │ Cloudflare│  │ VS Code  │  │ Google Drive     │  │
-│  │ Tunnel    │  │ Tunnel   │  │ (via rclone)     │  │
+│  │ Tunnel    │  │ Tunnel   │  │ (Drive mount) │  │
 │  └──────────┘  └──────────┘  └──────────────────┘  │
 └─────────────────────────────────────────────────────┘
 ```
@@ -112,17 +112,18 @@ DRIVE_FOLDER = "colab-roots" # Folder in Google Drive
 Colab Roots uses a multi-layer persistence strategy:
 
 1. **tmux sessions**: Survive terminal disconnects within a session
-2. **Google Drive sync**: Automatic background sync via rclone
-3. **State file**: Tracks installed packages, config, customizations
-4. **Auto-restore**: On reconnect, restores previous environment state
-5. **Keep-alive**: Prevents idle timeouts via periodic activity
+2. **Google Drive sync**: Background sync via rsync to the mounted Drive
+   folder (daemon runs it every 10 minutes)
+3. **State file**: Service state + heartbeat (`~/.colab-roots/state`)
+4. **Auto-restore**: On reconnect, the START cell restores your workspace and
+   saved packages from Drive
+5. **Keep-alive**: Prevents idle timeouts (START cell loop + daemon heartbeat)
 
 ### What gets persisted:
-- Installed pip packages (state file)
-- Git repositories (cloned to Drive)
-- Configuration files (.bashrc, .gitconfig, etc.)
-- Custom scripts and tools
-- tmux session names (for quick restore)
+- Workspace files (`/content/workspace` → Drive, excluding `.git`, `node_modules`, `__pycache__`, logs, `.env`)
+- Installed pip packages (snapshot in `requirements.txt` on Drive)
+- Git repositories (cloned into the workspace, synced to Drive)
+- Non-secret state files (tunnel name, heartbeat, service state)
 
 ### What doesn't persist (inherent Colab limitation):
 - GPU/CPU state (ephemeral VM)
@@ -143,7 +144,7 @@ roots status
 # Restart specific service
 roots restart code-server
 roots restart ttyd
-roots restart daemon
+roots restart vscode-tunnel   # only if VS Code tunnel enabled
 
 # View logs
 roots logs daemon
@@ -191,13 +192,13 @@ roots restart <service>
 
 ### Lost connection
 1. Check if Colab VM is still running (look at the notebook)
-2. If VM is alive, re-run the last notebook cell to get new URLs
-3. If VM is dead, re-run the notebook from the beginning
+2. If VM is alive, run the 🔄 **RE-LINK** cell to get fresh proxy links
+3. If VM is dead, run ▶️ **INICIAR TUDO** again — Drive restores your environment
 
 ### Drive sync failing
 ```bash
-roots sync --force     # Force full sync
-roots logs sync        # Check sync logs
+roots doctor       # Diagnose the issue
+roots logs daemon  # Check daemon logs (sync runs inside the daemon)
 ```
 
 ## License

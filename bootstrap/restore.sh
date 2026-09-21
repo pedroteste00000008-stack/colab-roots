@@ -91,7 +91,12 @@ echo "  GPU: $GPU"
 echo ""
 
 # ─── Restore from Drive (non-interactive) ──────────────────────
-DRIVE_PATH="/content/drive/MyDrive/colab-roots"
+# Prefere a pasta registrada pelo notebook; default "colab-roots"
+if [ -f "$ROOTS_STATE/drive_path" ]; then
+    DRIVE_PATH=$(cat "$ROOTS_STATE/drive_path")
+else
+    DRIVE_PATH="/content/drive/MyDrive/colab-roots"
+fi
 if [ -d "$DRIVE_PATH" ]; then
     echo "☁️  Found Drive backup at $DRIVE_PATH"
     

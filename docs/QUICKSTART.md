@@ -82,8 +82,9 @@ For quick public access:
 If you lose connection but the Colab VM is still running:
 
 1. Go back to the Colab notebook
-2. Run the "Check Status & Get URLs" cell
+2. Run the 🔄 **RE-LINK** cell (regenerates proxy links — no reinstall)
 3. Use the displayed URLs and credentials
+4. 📊 **STATUS** cell shows what's running and the heartbeat age
 
 ## Troubleshooting
 

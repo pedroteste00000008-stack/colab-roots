@@ -70,6 +70,22 @@ cloudflared tunnel --url http://127.0.0.1:8080 --no-autoupdate
 **Pros**: No account needed, instant public URLs
 **Cons**: Temporary (stops when process dies), URLs change each time
 
+### 5b. Colab Proxy (primary browser access)
+
+The *most important* access path. `google.colab.kernel.proxyPort(PORT)` asks Colab
+for a public URL that proxies into the VM's `127.0.0.1:PORT`:
+
+```
+https://xxx-8080.colab.googleusercontent.com/  →  127.0.0.1:8080 (code-server)
+```
+
+**Pros**: Works out of the box in the browser; automatic Google auth (no extra
+password to manage); HTTPS; no external account needed.
+**Cons**: The URL works while the runtime is alive; proxy is browser/account-bound.
+
+The START cell prints these URLs; the 🔄 RE-LINK cell regenerates them later.
+Services stay bound to `127.0.0.1` — only Colab's proxy can reach them.
+
 ### 6. Daemon (Process Manager)
 
 The daemon is a Python process that:
@@ -99,31 +115,33 @@ The daemon is a Python process that:
 
 ### 7. Persistence Layer
 
-#### Google Drive + rclone
-- Workspace files synced to `~/colab-roots/workspace/`
-- State files (excluding secrets) synced to `~/colab-roots/state/`
-- Package list saved as `requirements.txt`
-- Background sync every 10 minutes
+#### Google Drive (mount + rsync)
+- Workspace files synced to `MyDrive/colab-roots/workspace/` via rsync
+- Package snapshot saved as `requirements.txt`
+- Non-secret state files (tunnel name, heartbeat, service state) synced to `MyDrive/colab-roots/state/`
+- Background sync every 10 minutes (daemon loop); secrets (`password`, `code-server-pw`) never leave the VM
 
-#### State File
-- Tracks installed packages
-- Records system configuration
-- Stores custom scripts
-- Enables auto-restore on reconnect
+#### State File (`~/.colab-roots/state/`)
+- `services.json` — service status (no secrets, no PIDs)
+- `heartbeat` — latest keep-alive timestamp
+- `password` / `code-server-pw` — session credentials (0600)
+- `drive_path`, `tunnel_name`, `version`
 
-### 8. Keep-Alive (Multi-Layer)
+### 8. Keep-Alive (2 layers — what Colab idle detection actually watches)
 
-**Layer 1: Notebook Cell** (within Colab UI)
-- Background thread executing lightweight operations
-- Prevents 90-minute idle timeout
+Colab disconnects an idle runtime after ~90 min of inactivity (free tier).
+Idle = no kernel execution. So the critical keep-alive is a *blocking loop*:
 
-**Layer 2: Browser Tab** (JavaScript)
-- Periodic DOM manipulation
-- Simulates user activity
+**Layer 1: START cell loop** (primary)
+- The notebook's START cell enters an infinite loop after printing the links
+- It writes a heartbeat file + does a tiny CPU tick each interval
+- The kernel stays *executing* — Colab sees activity and keeps the VM alive
+- The user can close the browser tab; the loop keeps running on the VM
+- Interrupting the cell (■) stops this layer — services keep running
 
-**Layer 3: Daemon Heartbeat**
-- File-based heartbeat written every N seconds
-- External monitoring possible
+**Layer 2: Daemon heartbeat** (redundant backup)
+- Background process writing heartbeat + CPU ticks every interval
+- Costs nothing, keeps heartbeat file fresh even without the notebook open
 
 **Limitation**: Cannot prevent 12-hour maximum session limit or resource reclamation.
 
@@ -162,20 +180,22 @@ Colab VM
 ```
 ~/.colab-roots/
 ├── bin/
-│   └── roots              # CLI script
+│   └── roots              # CLI script (installed by the notebook)
 ├── logs/
 │   ├── daemon.log
 │   ├── code-server.log
 │   └── ttyd.log
 ├── src/
-│   └── daemon.py          # Daemon + CLI
+│   ├── daemon.py          # Daemon + CLI
+│   └── start_daemon.py    # Launcher written by the START cell
 ├── state/
-│   ├── password           # Session password (sensitive)
-│   ├── tunnel_name        # VS Code tunnel name
-│   ├── services.json      # Service state
+│   ├── password           # Session password (sensitive, 0600)
+│   ├── code-server-pw     # code-server password file (sensitive, 0600)
+│   ├── services.json      # Service state (no secrets/PIDs)
 │   ├── heartbeat          # Latest heartbeat timestamp
-│   ├── version            # Installed version
-│   └── code-server-pw     # code-server password file
+│   ├── tunnel_name        # VS Code tunnel name
+│   ├── drive_path         # Registered Drive backup folder
+│   └── version            # Installed version
 └── notebook/
     └── colab_roots.ipynb
 ```

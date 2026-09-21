@@ -96,7 +96,7 @@ class LockFile:
 class ColabRootsDaemon:
     """Manages all Colab Roots services with health monitoring and auto-restart."""
 
-    VERSION = "2.0.0"
+    VERSION = "2.1.0"
     MAX_RESTARTS = 5
     HEALTH_CHECK_INTERVAL = 15
     STABLE_RESET_AFTER = 300  # Reset restart counter after 5 min uptime
@@ -525,9 +525,8 @@ class ColabRootsDaemon:
         time.sleep(2 ** min(restart_count, 4))  # Exponential backoff: 1s, 2s, 4s, 8s, 16s
 
         if self._start_service(name):
-            self._services.set(name, "restart_count", restart_count + 1)
-        else:
-            self._services.set(name, "restart_count", restart_count + 1)
+            self.logger.info(f"  ✅ {name} restarted")
+        self._services.set(name, "restart_count", restart_count + 1)
 
     # ─── Keep-Alive ───────────────────────────────────────────────
 
@@ -807,12 +806,16 @@ class ColabRootsDaemon:
     def _cmd_urls(self) -> str:
         lines = []
         if self.config.get("enable_code_server"):
-            lines.append("🖥️  code-server: http://127.0.0.1:8080")
+            lines.append("🖥️  code-server: http://127.0.0.1:8080 (local)")
         if self.config.get("enable_ttyd"):
-            lines.append("💻 ttyd:         http://127.0.0.1:7681")
+            lines.append("💻 ttyd:         http://127.0.0.1:7681 (local)")
         if self.config.get("enable_vscode_tunnel"):
             tn = self.config.get("tunnel_name", "colab-roots")
             lines.append(f"🔧 VS Code:     Remote Tunnel '{tn}'")
+        if lines:
+            lines.append("")
+            lines.append("⚠️  Local links work only inside the VM. For browser access")
+            lines.append("    use the notebook's 🔄 RE-LINK cell (Colab proxy) or 🌐 Cloudflare cell.")
         return "\n".join(lines) if lines else "No services enabled"
 
     def _cmd_password(self) -> str:
@@ -888,6 +891,7 @@ Commands:
                 "health_failures": svc.get("health_failures", 0),
             }
         try:
+            self.roots_state.mkdir(parents=True, exist_ok=True)
             tmp = self.services_file.with_suffix(".tmp")
             tmp.write_text(json.dumps(state, indent=2))
             tmp.replace(self.services_file)
