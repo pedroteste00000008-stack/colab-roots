@@ -57,7 +57,7 @@ Google Colab VMs are ephemeral by design — they disappear when you disconnect 
 
 ### 1. Open in Colab
 
-[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/your-user/colab-roots/blob/main/notebook/colab_roots.ipynb)
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/pedroteste00000008-stack/colab-roots/blob/main/notebook/colab_roots.ipynb)
 
 ### 2. Set your preferences (optional)
 
