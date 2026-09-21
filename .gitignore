@@ -1,0 +1,50 @@
+# Colab Roots
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+.venv/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Colab Roots runtime (NEVER commit these)
+state/
+services.json
+heartbeat
+tunnel_name
+daemon.pid
+daemon.sock
+daemon.lock
+*.log
+*.tmp
+
+# Secrets (defense in depth — state/ already ignored above)
+password
+code-server-pw
+*.secret
+*.pem
+*.key
+
+# Build
+dist/
+build/
+*.egg-info/
+
+# Node
+node_modules/
+
+# Temporary
+/tmp/

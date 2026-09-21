@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+# Colab Roots CLI wrapper
+# Usage: roots <command> [service]
+#
+# Install:
+#   export PATH="$HOME/.colab-roots/bin:$PATH"
+#
+# Or symlink:
+#   ln -s ~/.colab-roots/scripts/roots /usr/local/bin/roots
+
+set -euo pipefail
+
+# Resolve the actual script location (follow symlinks)
+SOURCE="${BASH_SOURCE[0]}"
+while [ -L "$SOURCE" ]; do
+    DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+    SOURCE="$(readlink "$SOURCE")"
+    [[ $SOURCE != /* ]] && SOURCE="$DIR/$SOURCE"
+done
+SCRIPT_DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+
+ROOTS_HOME="${ROOTS_HOME:-$HOME/.colab-roots}"
+DAEMON_PY="$ROOTS_HOME/src/daemon.py"
+
+# Check if daemon module exists
+if [ ! -f "$DAEMON_PY" ]; then
+    echo "❌ Colab Roots not installed. Run the notebook first."
+    echo "   Expected: $DAEMON_PY"
+    exit 1
+fi
+
+# Execute CLI
+exec python3 "$DAEMON_PY" "$@"
