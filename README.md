@@ -53,49 +53,59 @@ Google Colab VMs are ephemeral by design — they disappear when you disconnect 
 └─────────────────────────────────────────────────────┘
 ```
 
-## Quick Start
+## Quick Start — one-click 🎬
 
 ### 1. Open in Colab
 
 [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/pedroteste00000008-stack/colab-roots/blob/main/notebook/colab_roots.ipynb)
 
-### 2. Set your preferences (optional)
+### 2. Press play
+
+**Runtime ▸ Run all. Wait 2–4 minutes. Done.**
+
+The notebook does everything by itself:
+
+1. Installs all dependencies
+2. Mounts Google Drive (optional — it *keeps working* if you skip the auth)
+3. Starts the services + daemon
+4. Prints your **IDE link** and **Terminal link** — real Colab proxy URLs that
+   work in your browser (no useless `127.0.0.1` links)
+5. Keeps your VM **alive** (blocking keep-alive loop — close the tab anytime)
+
+### 3. Connect
+
+- **Browser IDE**: click the IDE link → enter the printed password
+- **Terminal**: click the Terminal link → user `roots` + printed password
+- Re-open links later with the 🔄 **RE-LINK** cell
+- Optional 🌐 **Cloudflare** cell gives public URLs that work from any device
+  without a Google login
+
+### 4. Stop (when you're done)
+
+Interrupt the START cell (■), then run the 🛑 **PARAR** cell — or just
+`Runtime ▸ Disconnect & delete runtime`.
+
+## Advanced Configuration (optional)
 
 In the first cell, configure:
 ```python
 WORKSPACE_REPO = ""          # Git repo to clone (optional)
 WORKSPACE_BRANCH = "main"    # Branch/tag/ref
-ENABLE_VSCODE_TUNNEL = True  # VS Code Remote Tunnel
 ENABLE_CODE_SERVER = True    # Browser IDE
 ENABLE_TTYD = True           # Browser terminal
-ENABLE_SSH = False           # SSH via Cloudflare (optional)
+ENABLE_VSCODE_TUNNEL = False # VS Code Remote Tunnel (needs MS/GitHub login)
 PERSIST_TO_DRIVE = True      # Auto-sync to Google Drive
 DRIVE_FOLDER = "colab-roots" # Folder in Google Drive
 ```
-
-### 3. Run all cells
-
-The notebook will:
-1. Mount Google Drive (if persistence enabled)
-2. Install all dependencies
-3. Start services and tunnels
-4. Print access URLs and credentials
-
-### 4. Connect
-
-- **Browser IDE**: Click the code-server URL → full VS Code in browser
-- **VS Code Desktop**: Use Remote Tunnels extension → select your tunnel
-- **Terminal**: Click the ttyd URL → browser-based terminal
-- **SSH** (optional): Connect via the Cloudflare tunnel
 
 ## Services
 
 | Service | Port | Purpose | URL Pattern |
 |---------|------|---------|-------------|
-| code-server | 8080 | Full VS Code IDE in browser | `https://<tunnel>/code-server/` |
-| ttyd | 7681 | Browser terminal | `https://<tunnel>/ttyd/` |
-| VS Code Tunnel | - | Official VS Code Remote | Via VS Code extension |
-| SSH | 22 | Cloudflare tunnel SSH | `ssh root@<tunnel>` |
+| code-server | 8080 | Full VS Code IDE in browser | Colab proxy link printed by notebook |
+| ttyd | 7681 | Browser terminal | Colab proxy link printed by notebook |
+| VS Code Tunnel | - | Official VS Code Remote | Via VS Code extension (optional) |
+| Cloudflare | - | Public URLs, any device | `https://<sub>.trycloudflare.com` (optional cell) |
 
 ## Persistence Strategy
 
@@ -152,11 +162,13 @@ roots down
 
 ## Keep-Alive
 
-Colab Roots implements 3 layers of keep-alive:
+Colab Roots keeps your VM awake with 2 independent layers:
 
-1. **Notebook cell**: Periodic execution within the Colab notebook
-2. **Browser tab**: JavaScript-based tab activity simulation  
-3. **Daemon heartbeat**: Background process that maintains activity
+1. **START cell loop**: the notebook cell blocks with periodic heartbeat +
+   CPU activity — this is what Colab's idle detection actually watches.
+   You can close the tab; the loop keeps executing on the VM.
+2. **Daemon heartbeat**: background process writing heartbeat + CPU ticks
+   (redundant backup layer).
 
 ⚠️ **Note**: Keep-alive works against idle timeouts but not against 12-hour maximum session limits or resource reclamation. For guaranteed uptime, use GCP Marketplace VMs.
 

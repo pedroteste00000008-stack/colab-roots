@@ -1,19 +1,19 @@
 # Quick Start
 
-## Method 1: Direct from Colab (Recommended)
+## Method 1: One click (Recommended)
 
-1. Open Google Colab
-2. Create a new notebook
-3. Copy the bootstrap cell from `notebook/colab_roots.ipynb`
-4. Paste into your notebook and run
-
-## Method 2: From GitHub
-
-1. Click the badge below to open in Colab:
+1. Open the notebook in Colab with the badge below:
 
 [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/your-user/colab-roots/blob/main/notebook/colab_roots.ipynb)
 
-2. Run all cells
+2. Press **Runtime ▸ Run all**
+3. Wait 2–4 minutes while the VM is prepared
+4. Copy the **IDE link** and **Terminal link** printed at the end
+5. Close the tab — the VM keeps running (keep-alive loop)
+
+The START cell is fully self-contained: it installs everything, starts services,
+mounts Drive (and keeps working even if you skip the auth), and prints working
+Colab proxy URLs. No manual URLs like `127.0.0.1` — those don't work in Colab.
 
 ## Method 3: Manual Setup
 
@@ -49,8 +49,10 @@ nohup ttyd -p 7681 -W -c roots:YOUR_PASSWORD tmux attach -t roots &
 
 ### Step 4: Access
 
-- code-server: http://127.0.0.1:8080
-- ttyd: http://127.0.0.1:7681
+> ⚠️ **`127.0.0.1` não abre no seu navegador.** Esses links só funcionam *dentro* da VM.
+> No Colab, use **View ▸ Ports** (adição manual de 8080 e 7681) ou as URLs
+> Colab proxy geradas pelo notebook (célula ▶️ INICIAR TUDO). Este método manual
+> é para quem quer entender o mecanismo — o notebook one-click já faz tudo.
 
 ## First Time Setup
 

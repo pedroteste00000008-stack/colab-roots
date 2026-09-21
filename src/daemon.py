@@ -141,7 +141,7 @@ class ColabRootsDaemon:
                 config[key] = ""
 
         # Ensure interval is sane
-        interval = config.get("keep_alive_interval", 300)
+        interval = config.get("keep_alive_interval", 240)
         config["keep_alive_interval"] = max(int(interval), 60)
 
         # Sanitize tunnel name (no special chars)
@@ -532,13 +532,19 @@ class ColabRootsDaemon:
     # ─── Keep-Alive ───────────────────────────────────────────────
 
     def _keepalive(self):
-        """Periodically write heartbeat to prevent idle timeout."""
-        interval = self.config.get("keep_alive_interval", 300)
+        """Periodically write heartbeat + tiny CPU tick (second keep-alive layer).
+
+        The primary keep-alive is the long-running START cell in the notebook
+        (kernel stays busy, which is what Colab's idle detection watches).
+        This daemon loop is a redundant background layer that costs ~nothing.
+        """
+        interval = max(int(self.config.get("keep_alive_interval", 240)), 60)
 
         while self._running and not self._shutdown_event.is_set():
             try:
                 heartbeat = self.roots_state / "heartbeat"
                 heartbeat.write_text(datetime.now(timezone.utc).isoformat())
+                _ = sum(i * i for i in range(5000))  # lightweight CPU tick
                 self.logger.debug("💓 Heartbeat")
             except Exception as e:
                 self.logger.debug(f"Heartbeat write failed: {e}")
