@@ -53,6 +53,7 @@ C0 = r"""# 🌱 Colab Roots — One-Click Edition 🌳
 
 - 🖥️ **VS Code completo no navegador** (code-server)
 - 💻 **Terminal no navegador** com sessão tmux persistente (ttyd)
+- 🤖 **OpenCode Web** pronto para codar com agentes no mesmo workspace
 - 💾 **Backup automático no Google Drive** — seu trabalho sobrevive a reconexões
 - ❤️ **Keep-alive** — a VM não "dorme" nem desconecta por inatividade
 - 🔗 **Links externos de verdade** via Cloudflare Quick Tunnel (com senha) + fallback embutido do Colab
@@ -97,6 +98,7 @@ WORKSPACE_BRANCH  = "main"    #@param {type:"string"}
 # ── Serviços ─────────────────────────────────────────────────
 ENABLE_CODE_SERVER   = True   #@param {type:"boolean"}  IDE VS Code no navegador (porta 8080)
 ENABLE_TTYD          = True   #@param {type:"boolean"}  Terminal no navegador (porta 7681)
+ENABLE_OPENCODE       = True   #@param {type:"boolean"}  OpenCode Web (porta 4096)
 ENABLE_VSCODE_TUNNEL = False  #@param {type:"boolean"}  VS Code Remote Tunnel (pede login MS/GitHub)
 
 # ── Persistência ─────────────────────────────────────────────
@@ -129,6 +131,7 @@ else:
     pw_file.chmod(0o600)
 
 USERNAME = "roots"
+OPENCODE_USERNAME = "opencode"
 tn_file = ROOTS_STATE / "tunnel_name"
 if tn_file.exists():
     TUNNEL_NAME = tn_file.read_text().strip()
@@ -152,6 +155,8 @@ os.environ.update({
     "ROOTS_WORKSPACE_BRANCH": WORKSPACE_BRANCH,
     "ROOTS_ENABLE_CODE_SERVER": str(ENABLE_CODE_SERVER),
     "ROOTS_ENABLE_TTYD": str(ENABLE_TTYD),
+    "ROOTS_ENABLE_OPENCODE": str(ENABLE_OPENCODE),
+    "ROOTS_OPENCODE_USERNAME": OPENCODE_USERNAME,
     "ROOTS_ENABLE_VSCODE_TUNNEL": str(ENABLE_VSCODE_TUNNEL),
     "ROOTS_PERSIST_TO_DRIVE": str(PERSIST_TO_DRIVE),
 })
@@ -170,7 +175,7 @@ C3 = r"""## ▶️ INICIAR TUDO — um clique e pronto
 1. Instalar tudo (2–4 min, siga o progresso)
 2. Montar o Google Drive e **restaurar seu workspace + pacotes salvos** (aceite a autorização — dá para rodar **sem** o Drive também)
 3. Subir os serviços + daemon de backup
-4. Imprimir seus **links do IDE e do Terminal** (funcionam de verdade no navegador)
+4. Imprimir seus **links do IDE, Terminal e OpenCode** (funcionam de verdade no navegador)
 5. **Manter a VM viva** (fica piscando 💓 — é normal, deixe quieto)
 
 ✅ **Depois que imprimir os links você pode fechar a aba.** A VM continua de pé.
@@ -193,6 +198,8 @@ TUNNEL_NAME   = os.environ.get("ROOTS_TUNNEL", "colab-roots")
 
 ENABLE_CODE_SERVER   = os.environ.get("ROOTS_ENABLE_CODE_SERVER", "True") == "True"
 ENABLE_TTYD          = os.environ.get("ROOTS_ENABLE_TTYD", "True") == "True"
+ENABLE_OPENCODE       = os.environ.get("ROOTS_ENABLE_OPENCODE", "True") == "True"
+OPENCODE_USERNAME    = os.environ.get("ROOTS_OPENCODE_USERNAME", "opencode")
 ENABLE_VSCODE_TUNNEL = os.environ.get("ROOTS_ENABLE_VSCODE_TUNNEL", "False") == "True"
 PERSIST_TO_DRIVE     = os.environ.get("ROOTS_PERSIST_TO_DRIVE", "True") == "True"
 DRIVE_FOLDER         = os.environ.get("ROOTS_DRIVE_FOLDER", "colab-roots")
@@ -232,31 +239,44 @@ def wait_port(port, timeout=90):
         time.sleep(1)
     return False
 
-# ━━━ 1/8 Pacotes do sistema ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-print("📦 [1/8] Pacotes do sistema…")
+# ━━━ 1/9 Pacotes do sistema ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+print("📦 [1/9] Pacotes do sistema…")
 sh("apt-get update -qq")
 sh("apt-get install -y -qq curl wget git tmux jq rsync")
 print("   ✅ ok")
 
-# ━━━ 2/8 code-server (IDE VS Code no navegador) ━━━━━━━━━━
+# ━━━ 2/9 code-server (IDE VS Code no navegador) ━━━━━━━━━━
 if ENABLE_CODE_SERVER:
-    print("📦 [2/8] code-server…")
+    print("📦 [2/9] code-server…")
     if sh("command -v code-server").returncode != 0:
         sh("curl -fsSL https://code-server.dev/install.sh | sh")
     print("   ✅ ok")
 
-# ━━━ 3/8 ttyd (terminal no navegador) ━━━━━━━━━━━━━━━━━━━━
+# ━━━ 3/9 ttyd (terminal no navegador) ━━━━━━━━━━━━━━━━━━━━
 if ENABLE_TTYD:
-    print("📦 [3/8] ttyd…")
+    print("📦 [3/9] ttyd…")
     if sh("command -v ttyd").returncode != 0:
         if sh("wget -q https://github.com/tsl0922/ttyd/releases/latest/download/ttyd.x86_64 -O /usr/local/bin/ttyd").returncode != 0:
             sh("apt-get install -y -qq ttyd")
         sh("chmod +x /usr/local/bin/ttyd", check=False)
     print("   ✅ ok")
 
-# ━━━ 4/8 VS Code Remote Tunnel (opcional) ━━━━━━━━━━━━━━━━
+# ━━━ 4/9 OpenCode Web ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+OPENCODE_BIN_DIR = Path.home() / ".opencode" / "bin"
+os.environ["PATH"] = f"{OPENCODE_BIN_DIR}:{os.environ.get('PATH', '')}"
+if ENABLE_OPENCODE:
+    print("📦 [4/9] OpenCode…")
+    if sh("command -v opencode").returncode != 0:
+        install = sh("curl -fsSL https://opencode.ai/v2/install | bash")
+        if install.returncode != 0:
+            print(f"   ⚠️ instalação do OpenCode falhou: {(install.stderr or '')[:300]}")
+    os.environ["PATH"] = f"{OPENCODE_BIN_DIR}:{os.environ.get('PATH', '')}"
+    ok = sh("command -v opencode").returncode == 0
+    print("   ✅ ok" if ok else "   ❌ OpenCode não instalado")
+
+# ━━━ 5/9 VS Code Remote Tunnel (opcional) ━━━━━━━━━━━━━━━━
 if ENABLE_VSCODE_TUNNEL:
-    print("🔧 [4/8] VS Code Remote Tunnel…")
+    print("🔧 [5/9] VS Code Remote Tunnel…")
     if sh("command -v code-tunnel").returncode != 0:
         sh("wget -q 'https://code.visualstudio.com/sha/download?build=stable&os=cli-alpine-x64' -O /tmp/vscode-cli.tar.gz")
         sh("mkdir -p /tmp/vscode-cli-extract")
@@ -266,10 +286,10 @@ if ENABLE_VSCODE_TUNNEL:
     ok = sh("command -v code-tunnel").returncode == 0
     print("   ✅ ok" if ok else "   ⚠️ pulado (opcional)")
 
-# ━━━ 5/8 Google Drive (backup) ━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# ━━━ 6/9 Google Drive (backup) ━━━━━━━━━━━━━━━━━━━━━━━━━━━
 DRIVE_PATH = ""
 if PERSIST_TO_DRIVE:
-    print("☁️  [5/8] Google Drive…")
+    print("☁️  [6/9] Google Drive…")
     if not Path("/content/drive/MyDrive").exists():
         try:
             from google.colab import drive
@@ -288,10 +308,10 @@ if PERSIST_TO_DRIVE:
     else:
         print("   ⚠️ Sem Drive — rodando sem persistência")
 
-# ━━━ 6/8 Workspace (repo opcional ou restauração do Drive) ━
+# ━━━ 7/9 Workspace (repo opcional ou restauração do Drive) ━
 WORKSPACE_REPO = os.environ.get("ROOTS_WORKSPACE_REPO", "").strip()
 if WORKSPACE_REPO:
-    print("📥 [6/8] Clonando workspace…")
+    print("📥 [7/9] Clonando workspace…")
     if (ROOTS_WORKSPACE / ".git").exists():
         sh(f"cd {ROOTS_WORKSPACE} && git pull --ff-only", check=False)
     else:
@@ -306,19 +326,19 @@ elif DRIVE_PATH and not any(ROOTS_WORKSPACE.iterdir()):
     # Restauração com semântica segura: SÓ quando o local está vazio
     ws_backup = Path(DRIVE_PATH) / "workspace"
     if ws_backup.exists() and any(ws_backup.iterdir()):
-        print("📥 [6/8] Restaurando workspace do Drive…")
+        print("📥 [7/9] Restaurando workspace do Drive…")
         r = sh(f"rsync -a --exclude=.git --exclude=node_modules --exclude=__pycache__ --exclude='*.log' --exclude=.env '{ws_backup}/' '{ROOTS_WORKSPACE}/'")
         if r.returncode == 0:
             print("   ✅ workspace restaurado do Drive")
         else:
             print("   ⚠️  restore do workspace FALHOU — os arquivos locais ficaram como estão")
     else:
-        print("   ℹ️  [6/8] Workspace vazio e sem backup no Drive — começando do zero")
+        print("   ℹ️  [7/9] Workspace vazio e sem backup no Drive — começando do zero")
 else:
-    print("   ℹ️  [6/8] Workspace já tem conteúdo — mantendo (nunca sobrescreve)")
+    print("   ℹ️  [7/9] Workspace já tem conteúdo — mantendo (nunca sobrescreve)")
 
-# ━━━ 7/8 Daemon + serviços ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-print("🤖 [7/8] Daemon + serviços…")
+# ━━━ 8/9 Daemon + serviços ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+print("🤖 [8/9] Daemon + serviços…")
 
 def obtain_daemon():
     for c in (Path(os.getcwd()) / "src" / "daemon.py",
@@ -368,6 +388,8 @@ if DAEMON_AVAILABLE:
         " 'roots_home': os.environ['ROOTS_HOME'],\n"
         " 'enable_code_server': os.environ.get('ROOTS_ENABLE_CODE_SERVER', 'True') == 'True',\n"
         " 'enable_ttyd': os.environ.get('ROOTS_ENABLE_TTYD', 'True') == 'True',\n"
+        " 'enable_opencode': os.environ.get('ROOTS_ENABLE_OPENCODE', 'True') == 'True',\n"
+        " 'opencode_username': os.environ.get('ROOTS_OPENCODE_USERNAME', 'opencode'),\n"
         " 'enable_vscode_tunnel': os.environ.get('ROOTS_ENABLE_VSCODE_TUNNEL', 'False') == 'True',\n"
         " 'persist_to_drive': os.environ.get('ROOTS_PERSIST_TO_DRIVE', 'False') == 'True',\n"
         " 'drive_path': os.environ.get('ROOTS_DRIVE_PATH', ''),\n"
@@ -384,6 +406,7 @@ if DAEMON_AVAILABLE:
     # Limpeza para o daemon ser dono das portas (idempotente)
     sh("pkill -f '[c]ode-server' 2>/dev/null || true")
     sh("pkill -x ttyd 2>/dev/null || true")
+    sh("pkill -f '[o]pencode serve --hostname 127.0.0.1 --port 4096' 2>/dev/null || true")
     log = open(ROOTS_LOGS / "daemon.log", "ab")
     env = dict(os.environ, **{
         "ROOTS_HOME": str(ROOTS_HOME),
@@ -395,6 +418,8 @@ if DAEMON_AVAILABLE:
         "ROOTS_DRIVE_PATH": DRIVE_PATH,
         "ROOTS_ENABLE_CODE_SERVER": str(ENABLE_CODE_SERVER),
         "ROOTS_ENABLE_TTYD": str(ENABLE_TTYD),
+        "ROOTS_ENABLE_OPENCODE": str(ENABLE_OPENCODE),
+        "ROOTS_OPENCODE_USERNAME": OPENCODE_USERNAME,
         "ROOTS_ENABLE_VSCODE_TUNNEL": str(ENABLE_VSCODE_TUNNEL),
         "ROOTS_PERSIST_TO_DRIVE": str(PERSIST_TO_DRIVE),
         "ROOTS_KEEP_ALIVE_INTERVAL": str(KEEP_ALIVE_INTERVAL),
@@ -411,14 +436,36 @@ else:
         sh(f"nohup code-server --bind-addr 127.0.0.1:8080 --auth password --password-file '{ROOTS_STATE/'code-server-pw'}' --disable-telemetry --disable-update-check {ROOTS_WORKSPACE} > {ROOTS_LOGS}/code-server.log 2>&1 & echo $! > {ROOTS_STATE}/code-server.pid")
     if ENABLE_TTYD and not listening(7681):
         sh(f"nohup ttyd -p 7681 -W -c '{USERNAME}:{PASSWORD}' tmux attach -t roots > {ROOTS_LOGS}/ttyd.log 2>&1 & echo $! > {ROOTS_STATE}/ttyd.pid")
+    if ENABLE_OPENCODE and not listening(4096):
+        opencode_env = os.environ.copy()
+        opencode_env.update({
+            "OPENCODE_SERVER_USERNAME": OPENCODE_USERNAME,
+            "OPENCODE_SERVER_PASSWORD": PASSWORD,
+        })
+        opencode_log = open(ROOTS_LOGS / "opencode.log", "ab")
+        try:
+            opencode_cmd = "opencode serve --hostname 127.0.0.1 --port 4096".split()
+            opencode_proc = subprocess.Popen(
+                opencode_cmd,
+                cwd=str(ROOTS_WORKSPACE),
+                env=opencode_env,
+                stdout=opencode_log,
+                stderr=subprocess.STDOUT,
+                start_new_session=True,
+            )
+            (ROOTS_STATE / "opencode.pid").write_text(str(opencode_proc.pid))
+        finally:
+            opencode_log.close()
 
 print("   ⏳ esperando serviços subirem…")
 if ENABLE_CODE_SERVER:
     print("   " + ("✅ code-server :8080" if wait_port(8080, 90) else "❌ code-server falhou"))
 if ENABLE_TTYD:
     print("   " + ("✅ ttyd :7681" if wait_port(7681, 90) else "❌ ttyd falhou"))
+if ENABLE_OPENCODE:
+    print("   " + ("✅ OpenCode :4096" if wait_port(4096, 90) else "❌ OpenCode falhou"))
 
-# ━━━ 8/8 Acesso (links externos reais + fallback Colab) ━━━━━━
+# ━━━ 9/9 Acesso (links externos reais + fallback Colab) ━━━━━━
 print("\n⏳ criando links externos de acesso…")
 import re, shutil, signal
 
@@ -488,12 +535,14 @@ for stale in ROOTS_STATE.glob("cloudflare-*.url"):
 for stale in ROOTS_STATE.glob("cloudflare-*.pid"):
     stale.unlink(missing_ok=True)
 
-IDE_URL = TTYD_URL = None
+IDE_URL = TTYD_URL = OPENCODE_URL = None
 if ensure_cloudflared():
     if ENABLE_CODE_SERVER and listening(8080):
         IDE_URL = start_quick_tunnel(8080, "code-server")
     if ENABLE_TTYD and listening(7681):
         TTYD_URL = start_quick_tunnel(7681, "ttyd")
+    if ENABLE_OPENCODE and listening(4096):
+        OPENCODE_URL = start_quick_tunnel(4096, "opencode")
 
 print()
 print("=" * 62)
@@ -509,13 +558,18 @@ if TTYD_URL:
 elif ENABLE_TTYD and listening(7681):
     print("  💻  Terminal: sem link externo; abrindo fallback dentro do notebook abaixo")
     show_colab_iframe(7681, "Terminal", "360")
-if not (IDE_URL or TTYD_URL):
+if OPENCODE_URL:
+    print(f"  🤖 OpenCode:\n      {OPENCODE_URL}\n      usuário: {OPENCODE_USERNAME}   senha: {PASSWORD}")
+elif ENABLE_OPENCODE and listening(4096):
+    print("  🤖 OpenCode: sem link externo; abrindo fallback dentro do notebook abaixo")
+    show_colab_iframe(4096, "OpenCode", "720")
+if not (IDE_URL or TTYD_URL or OPENCODE_URL):
     print("  ⚠️  Nenhum link externo foi criado. Use os iframes acima ou rode 🔄 RE-LINK.")
 print(f"  🔑  Senha também salva em: {ROOTS_STATE / 'password'}")
 print(f"  🛠️  Gerenciar com:          {ROOTS_BIN}/roots status")
 if DRIVE_PATH:
     print(f"  ☁️  Backup no Drive:        {DRIVE_PATH}")
-print("  🔒  Os URLs trycloudflare.com são públicos, mas IDE/terminal continuam protegidos pela senha.")
+print("  🔒  Os URLs trycloudflare.com são públicos, mas IDE/terminal/OpenCode continuam protegidos pela senha.")
 print("      Reabra/renove depois com a célula 🔄 RE-LINK.")
 print("=" * 62)
 
@@ -592,6 +646,7 @@ ROOTS_LOGS  = ROOTS_HOME / "logs"
 ROOTS_STATE = ROOTS_HOME / "state"
 PASSWORD = (ROOTS_STATE / "password").read_text().strip() if (ROOTS_STATE / "password").exists() else ""
 USERNAME = os.environ.get("ROOTS_USERNAME", "roots")
+OPENCODE_USERNAME = os.environ.get("ROOTS_OPENCODE_USERNAME", "opencode")
 
 def listening(port):
     try:
@@ -664,13 +719,18 @@ def show_iframe(port, label, height):
 print("🔄 Verificando links externos…")
 IDE_URL = saved_tunnel("code-server") if listening(8080) else None
 TTYD_URL = saved_tunnel("ttyd") if listening(7681) else None
+OPENCODE_URL = saved_tunnel("opencode") if listening(4096) else None
 
-if (listening(8080) and not IDE_URL) or (listening(7681) and not TTYD_URL):
+if ((listening(8080) and not IDE_URL) or
+        (listening(7681) and not TTYD_URL) or
+        (listening(4096) and not OPENCODE_URL)):
     if ensure_cloudflared():
         if listening(8080) and not IDE_URL:
             IDE_URL = start_quick_tunnel(8080, "code-server")
         if listening(7681) and not TTYD_URL:
             TTYD_URL = start_quick_tunnel(7681, "ttyd")
+        if listening(4096) and not OPENCODE_URL:
+            OPENCODE_URL = start_quick_tunnel(4096, "opencode")
 
 print("=" * 62)
 print("  🌳 Seus links atuais")
@@ -685,7 +745,12 @@ if TTYD_URL:
 elif listening(7681):
     print("  💻  Terminal: link externo indisponível")
     show_iframe(7681, "Terminal", "360")
-if not any((IDE_URL, TTYD_URL, listening(8080), listening(7681))):
+if OPENCODE_URL:
+    print(f"  🤖 OpenCode:\n      {OPENCODE_URL}\n      usuário: {OPENCODE_USERNAME}  senha: {PASSWORD}")
+elif listening(4096):
+    print("  🤖 OpenCode: link externo indisponível")
+    show_iframe(4096, "OpenCode", "720")
+if not any((IDE_URL, TTYD_URL, OPENCODE_URL, listening(8080), listening(7681), listening(4096))):
     print("  ⚠️  Os serviços não estão no ar. Se a VM foi reciclada, rode ▶️ INICIAR TUDO.")
 print(f"\n  🔑 Senha: {ROOTS_STATE / 'password'}")
 """
@@ -709,7 +774,7 @@ def listening(port):
 print("═" * 34)
 print("  🌳 Colab Roots — Status")
 print("═" * 34)
-for name, port in (("code-server (IDE)", 8080), ("ttyd (Terminal)", 7681)):
+for name, port in (("code-server (IDE)", 8080), ("ttyd (Terminal)", 7681), ("OpenCode Web", 4096)):
     on = listening(port)
     print(f"  {'✅' if on else '❌'} {name:20s} {'rodando' if on else 'parado'}")
 
@@ -784,7 +849,7 @@ def start_tunnel(port):
     return proc, url
 
 print("🌐 Subindo túneis públicos…")
-for name, port in (("IDE", 8080), ("Terminal", 7681)):
+for name, port in (("IDE", 8080), ("Terminal", 7681), ("OpenCode", 4096)):
     if not listening(port):
         print(f"   ⏭️  {name} não está rodando")
         continue
@@ -793,8 +858,10 @@ for name, port in (("IDE", 8080), ("Terminal", 7681)):
         print(f"  🌐 {name}: {url}")
         if name == "IDE":
             print(f"     senha: {PASSWORD}")
-        else:
+        elif name == "Terminal":
             print(f"     usuário: roots  senha: {PASSWORD}")
+        else:
+            print(f"     usuário: opencode  senha: {PASSWORD}")
     else:
         print(f"  ⚠️  {name}: não consegui capturar a URL")
 
@@ -836,6 +903,7 @@ if pf.exists():
 # 2) Sobras (garantia)
 pkill("[c]ode-server")
 pkill("[t]tyd")
+pkill("[o]pencode.*serve")
 pkill("[c]loudflared")
 
 # 3) tmux
