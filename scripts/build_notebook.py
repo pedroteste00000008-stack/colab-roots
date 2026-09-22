@@ -541,7 +541,7 @@ def start_quick_tunnel(port, label):
     return None
 
 def start_opencode_tunnel(port=4096):
-    """localhost.run is used because OpenCode depends on SSE (/api/event)."""
+    # localhost.run is used because OpenCode depends on SSE (/api/event).
     log_path = ROOTS_LOGS / "opencode-tunnel.log"
     pid_path = ROOTS_STATE / "opencode-tunnel.pid"
     url_path = ROOTS_STATE / "opencode-tunnel.url"
