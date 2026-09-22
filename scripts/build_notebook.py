@@ -242,7 +242,7 @@ def wait_port(port, timeout=90):
 # ━━━ 1/9 Pacotes do sistema ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 print("📦 [1/9] Pacotes do sistema…")
 sh("apt-get update -qq")
-sh("apt-get install -y -qq curl wget git tmux jq rsync")
+sh("apt-get install -y -qq curl wget git tmux jq rsync openssh-client")
 print("   ✅ ok")
 
 # ━━━ 2/9 code-server (IDE VS Code no navegador) ━━━━━━━━━━
@@ -468,9 +468,9 @@ if ENABLE_OPENCODE and OPENCODE_READY:
 elif ENABLE_OPENCODE:
     print("   ⏭️  OpenCode indisponível porque a instalação falhou")
 
-# ━━━ 9/9 Acesso (links externos reais + fallback Colab) ━━━━━━
+# ━━━ 9/9 Acesso (Cloudflare para IDE/terminal + SSE tunnel para OpenCode) ━━━━━━
 print("\n⏳ criando links externos de acesso…")
-import re, shutil, signal
+import re, shutil, signal, base64, json, urllib.request, urllib.error
 
 def ensure_cloudflared():
     if shutil.which("cloudflared"):
@@ -486,6 +486,25 @@ def ensure_cloudflared():
         return False
     return shutil.which("cloudflared") is not None
 
+def pid_alive(path):
+    try:
+        os.kill(int(path.read_text().strip()), 0)
+        return True
+    except (OSError, ValueError):
+        return False
+
+def stop_pid_file(path):
+    try:
+        pid = int(path.read_text().strip())
+    except (OSError, ValueError):
+        path.unlink(missing_ok=True)
+        return
+    try:
+        os.killpg(os.getpgid(pid), signal.SIGTERM)
+    except (ProcessLookupError, PermissionError, OSError):
+        pass
+    path.unlink(missing_ok=True)
+
 def start_quick_tunnel(port, label):
     log_path = ROOTS_LOGS / f"cloudflared-{label}.log"
     pid_path = ROOTS_STATE / f"cloudflare-{label}.pid"
@@ -494,7 +513,7 @@ def start_quick_tunnel(port, label):
     log_fh = open(log_path, "w")
     try:
         proc = subprocess.Popen(
-            ["cloudflared", "tunnel", "--url", f"http://127.0.0.1:{port}", "--no-autoupdate"],
+            ["cloudflared", "tunnel", "--protocol", "http2", "--url", f"http://127.0.0.1:{port}", "--no-autoupdate"],
             stdout=log_fh, stderr=subprocess.STDOUT, text=True, start_new_session=True,
         )
     finally:
@@ -521,31 +540,169 @@ def start_quick_tunnel(port, label):
     print(f"   ⚠️ tunnel {label} não gerou URL" + (f":\n{tail}" if tail else ""))
     return None
 
-def show_colab_iframe(port, label, height):
+def start_opencode_tunnel(port=4096):
+    """localhost.run is used because OpenCode depends on SSE (/api/event)."""
+    log_path = ROOTS_LOGS / "opencode-tunnel.log"
+    pid_path = ROOTS_STATE / "opencode-tunnel.pid"
+    url_path = ROOTS_STATE / "opencode-tunnel.url"
+    known_hosts = ROOTS_STATE / "localhostrun_known_hosts"
+    stop_pid_file(pid_path)
+    url_path.unlink(missing_ok=True)
+
+    log_fh = open(log_path, "w")
+    try:
+        proc = subprocess.Popen(
+            [
+                "ssh", "-T",
+                "-o", "ExitOnForwardFailure=yes",
+                "-o", "ServerAliveInterval=30",
+                "-o", "ServerAliveCountMax=3",
+                "-o", "StrictHostKeyChecking=accept-new",
+                "-o", f"UserKnownHostsFile={known_hosts}",
+                "-R", f"80:127.0.0.1:{port}",
+                "nokey@localhost.run",
+            ],
+            stdout=log_fh, stderr=subprocess.STDOUT, text=True, start_new_session=True,
+        )
+    finally:
+        log_fh.close()
+    pid_path.write_text(str(proc.pid))
+
+    pattern = re.compile(r"(https://[A-Za-z0-9-]+\.lhr\.life(?:[^\s\x1b]*)?)")
+    for _ in range(80):
+        if proc.poll() is not None:
+            break
+        time.sleep(0.5)
+        try:
+            m = pattern.search(log_path.read_text(errors="replace"))
+        except OSError:
+            m = None
+        if m:
+            url = m.group(1).rstrip("/.,);]")
+            url_path.write_text(url)
+            return url
+    tail = ""
+    try:
+        tail = "\n".join(log_path.read_text(errors="replace").splitlines()[-12:])
+    except OSError:
+        pass
+    print("   ⚠️ tunnel SSE do OpenCode não gerou URL" + (f":\n{tail}" if tail else ""))
+    stop_pid_file(pid_path)
+    return None
+
+def opencode_headers(accept="application/json"):
+    token = base64.b64encode(f"{OPENCODE_USERNAME}:{PASSWORD}".encode()).decode()
+    return {
+        "Authorization": f"Basic {token}",
+        "x-opencode-directory": str(ROOTS_WORKSPACE),
+        "Accept": accept,
+    }
+
+def data_list(payload):
+    if isinstance(payload, list):
+        return payload
+    if isinstance(payload, dict):
+        value = payload.get("data")
+        if isinstance(value, list):
+            return value
+    return []
+
+def probe_opencode_api(base_url, timeout=15):
+    counts = {}
+    for endpoint, must_have_items in (
+        ("/api/agent", True),
+        ("/api/provider", True),
+        ("/api/model", True),
+        ("/api/session", False),
+    ):
+        try:
+            req = urllib.request.Request(base_url.rstrip("/") + endpoint, headers=opencode_headers())
+            with urllib.request.urlopen(req, timeout=timeout) as response:
+                raw = response.read()
+                if response.status != 200:
+                    return False, counts, f"{endpoint} HTTP {response.status}"
+                payload = json.loads(raw.decode() or "{}")
+                items = data_list(payload)
+                counts[endpoint] = len(items)
+                if must_have_items and not items:
+                    return False, counts, f"{endpoint} respondeu vazio"
+        except Exception as exc:
+            return False, counts, f"{endpoint}: {exc}"
+    return True, counts, None
+
+def probe_opencode_sse(base_url, timeout=12):
+    try:
+        req = urllib.request.Request(
+            base_url.rstrip("/") + "/api/event",
+            headers=opencode_headers("text/event-stream"),
+        )
+        with urllib.request.urlopen(req, timeout=timeout) as response:
+            ctype = (response.headers.get("Content-Type") or "").lower()
+            if response.status != 200 or not ctype.startswith("text/event-stream"):
+                return False, f"/api/event HTTP {response.status} content-type={ctype!r}"
+            for _ in range(80):
+                line = response.readline().decode(errors="replace").strip()
+                if line.startswith("data:") or line.startswith("event:"):
+                    return True, None
+            return False, "/api/event encerrou/ficou sem frame SSE"
+    except Exception as exc:
+        return False, str(exc)
+
+def show_colab_iframe(port, label, height, path="/"):
     try:
         from google.colab import output
         print(f"   ↪ {label}: usando acesso embutido suportado pelo Colab")
-        output.serve_kernel_port_as_iframe(port, height=height)
+        output.serve_kernel_port_as_iframe(port, path=path, height=height)
         return True
     except Exception as e:
         print(f"   ⚠️ fallback embutido {label} indisponível: {e}")
         return False
 
-# proxyPort() cru não é um link público estável. Quick Tunnel é o link externo.
+# Cloudflare continua para IDE/terminal; OpenCode usa túnel SSE-capable separado.
 sh("pkill -f '[c]loudflared' 2>/dev/null || true")
 for stale in ROOTS_STATE.glob("cloudflare-*.url"):
     stale.unlink(missing_ok=True)
 for stale in ROOTS_STATE.glob("cloudflare-*.pid"):
     stale.unlink(missing_ok=True)
 
-IDE_URL = TTYD_URL = OPENCODE_URL = None
+IDE_URL = TTYD_URL = None
 if ensure_cloudflared():
     if ENABLE_CODE_SERVER and listening(8080):
         IDE_URL = start_quick_tunnel(8080, "code-server")
     if ENABLE_TTYD and listening(7681):
         TTYD_URL = start_quick_tunnel(7681, "ttyd")
-    if ENABLE_OPENCODE and OPENCODE_READY and listening(4096):
-        OPENCODE_URL = start_quick_tunnel(4096, "opencode")
+
+OPENCODE_BASE_URL = OPENCODE_PROJECT_URL = None
+OPENCODE_PROJECT_SLUG = base64.urlsafe_b64encode(str(ROOTS_WORKSPACE).encode()).decode().rstrip("=")
+OPENCODE_PROBE_COUNTS = {}
+if ENABLE_OPENCODE and OPENCODE_READY and listening(4096):
+    local_ok, local_counts, local_error = probe_opencode_api("http://127.0.0.1:4096")
+    if local_ok:
+        print(
+            "   ✅ OpenCode API local:"
+            f" agents={local_counts.get('/api/agent', 0)}"
+            f" providers={local_counts.get('/api/provider', 0)}"
+            f" models={local_counts.get('/api/model', 0)}"
+            f" sessions={local_counts.get('/api/session', 0)}"
+        )
+        OPENCODE_BASE_URL = start_opencode_tunnel(4096)
+        if OPENCODE_BASE_URL:
+            public_ok, public_counts, public_error = probe_opencode_api(OPENCODE_BASE_URL)
+            sse_ok, sse_error = probe_opencode_sse(OPENCODE_BASE_URL)
+            if public_ok and sse_ok:
+                OPENCODE_PROBE_COUNTS = public_counts
+                OPENCODE_PROJECT_URL = f"{OPENCODE_BASE_URL}/{OPENCODE_PROJECT_SLUG}"
+                (ROOTS_STATE / "opencode-project.url").write_text(OPENCODE_PROJECT_URL)
+                print("   ✅ OpenCode público: API de projeto + SSE validados")
+            else:
+                print(
+                    "   ⚠️ OpenCode público reprovou probe:"
+                    f" API={public_error or 'ok'}; SSE={sse_error or 'ok'}"
+                )
+                stop_pid_file(ROOTS_STATE / "opencode-tunnel.pid")
+                OPENCODE_BASE_URL = None
+    else:
+        print(f"   ⚠️ OpenCode local não está pronto no contexto do workspace: {local_error}")
 
 print()
 print("=" * 62)
@@ -561,18 +718,22 @@ if TTYD_URL:
 elif ENABLE_TTYD and listening(7681):
     print("  💻  Terminal: sem link externo; abrindo fallback dentro do notebook abaixo")
     show_colab_iframe(7681, "Terminal", "360")
-if OPENCODE_URL:
-    print(f"  🤖 OpenCode:\n      {OPENCODE_URL}\n      usuário: {OPENCODE_USERNAME}   senha: {PASSWORD}")
+if OPENCODE_PROJECT_URL:
+    print(
+        f"  🤖 OpenCode:\n      {OPENCODE_PROJECT_URL}"
+        f"\n      usuário: {OPENCODE_USERNAME}   senha: {PASSWORD}"
+        f"\n      workspace: {ROOTS_WORKSPACE}"
+    )
 elif ENABLE_OPENCODE and listening(4096):
-    print("  🤖 OpenCode: sem link externo; abrindo fallback dentro do notebook abaixo")
-    show_colab_iframe(4096, "OpenCode", "720")
-if not (IDE_URL or TTYD_URL or OPENCODE_URL):
-    print("  ⚠️  Nenhum link externo foi criado. Use os iframes acima ou rode 🔄 RE-LINK.")
+    print("  🤖 OpenCode: link externo SSE indisponível; abrindo o projeto dentro do notebook")
+    show_colab_iframe(4096, "OpenCode", "720", "/" + OPENCODE_PROJECT_SLUG)
+if not (IDE_URL or TTYD_URL or OPENCODE_PROJECT_URL):
+    print("  ⚠️  Nenhum link externo foi criado para um ou mais serviços. Use os fallbacks acima ou rode 🔄 RE-LINK.")
 print(f"  🔑  Senha também salva em: {ROOTS_STATE / 'password'}")
 print(f"  🛠️  Gerenciar com:          {ROOTS_BIN}/roots status")
 if DRIVE_PATH:
     print(f"  ☁️  Backup no Drive:        {DRIVE_PATH}")
-print("  🔒  Os URLs trycloudflare.com são públicos, mas IDE/terminal/OpenCode continuam protegidos pela senha.")
+print("  🔒  IDE/terminal usam Cloudflare; OpenCode usa localhost.run porque precisa de SSE.")
 print("      Reabra/renove depois com a célula 🔄 RE-LINK.")
 print("=" * 62)
 
@@ -607,13 +768,14 @@ except KeyboardInterrupt:
 C5 = r"""## 🔗 Seus links & como funciona
 
 ### Links externos
-O START agora cria URLs temporárias `https://*.trycloudflare.com` para o IDE,
-Terminal e OpenCode. Esses são túneis HTTP reais e podem ser abertos em outra
-aba ou dispositivo enquanto a VM estiver viva.
+O START cria URLs temporárias para IDE e Terminal via Cloudflare. O OpenCode usa
+um túnel SSH via localhost.run, porque sua UI depende de SSE em `/api/event`.
+O link do OpenCode já aponta para a rota codificada de `/content/workspace`,
+para que modelos, agents e sessões carreguem no contexto correto.
 
 - **IDE** → senha mostrada pelo START
 - **Terminal** → usuário `roots` + a mesma senha
-- **OpenCode** → usuário `opencode` + a mesma senha
+- **OpenCode** → usuário `opencode` + a mesma senha; link já abre `/content/workspace`
 - Os links são públicos na Internet, mas os serviços continuam protegidos pela senha.
 
 ### Por que não usamos mais o URL `*.prod.colab.dev`?
@@ -642,12 +804,13 @@ Se a VM ainda está viva, rode:
 # CELL 6 — Re-link
 # ─────────────────────────────────────────────────────────────────────
 C6 = r"""#@title 🔄 RE-LINK (reutilizar/recriar links externos){display-mode:"form"}
-import os, time, socket, subprocess, re, shutil
+import os, time, socket, subprocess, re, shutil, signal, base64, json, urllib.request
 from pathlib import Path
 
 ROOTS_HOME  = Path(os.environ.get("ROOTS_HOME", str(Path.home() / ".colab-roots")))
 ROOTS_LOGS  = ROOTS_HOME / "logs"
 ROOTS_STATE = ROOTS_HOME / "state"
+ROOTS_WORKSPACE = Path(os.environ.get("ROOTS_WORKSPACE", "/content/workspace"))
 PASSWORD = (ROOTS_STATE / "password").read_text().strip() if (ROOTS_STATE / "password").exists() else ""
 USERNAME = os.environ.get("ROOTS_USERNAME", "roots")
 OPENCODE_USERNAME = os.environ.get("ROOTS_OPENCODE_USERNAME", "opencode")
@@ -665,12 +828,33 @@ def pid_alive(path):
     except (OSError, ValueError):
         return False
 
+def stop_pid_file(path):
+    try:
+        pid = int(path.read_text().strip())
+    except (OSError, ValueError):
+        path.unlink(missing_ok=True)
+        return
+    try:
+        os.killpg(os.getpgid(pid), signal.SIGTERM)
+    except (ProcessLookupError, PermissionError, OSError):
+        pass
+    path.unlink(missing_ok=True)
+
 def saved_tunnel(label):
     pid_path = ROOTS_STATE / f"cloudflare-{label}.pid"
     url_path = ROOTS_STATE / f"cloudflare-{label}.url"
     if pid_path.exists() and url_path.exists() and pid_alive(pid_path):
         url = url_path.read_text().strip()
         if url.startswith("https://") and ".trycloudflare.com" in url:
+            return url
+    return None
+
+def saved_opencode_tunnel():
+    pid_path = ROOTS_STATE / "opencode-tunnel.pid"
+    url_path = ROOTS_STATE / "opencode-tunnel.url"
+    if pid_path.exists() and url_path.exists() and pid_alive(pid_path):
+        url = url_path.read_text().strip()
+        if url.startswith("https://") and ".lhr.life" in url:
             return url
     return None
 
@@ -691,7 +875,7 @@ def start_quick_tunnel(port, label):
     log_fh = open(log_path, "w")
     try:
         proc = subprocess.Popen(
-            ["cloudflared", "tunnel", "--url", f"http://127.0.0.1:{port}", "--no-autoupdate"],
+            ["cloudflared", "tunnel", "--protocol", "http2", "--url", f"http://127.0.0.1:{port}", "--no-autoupdate"],
             stdout=log_fh, stderr=subprocess.STDOUT, text=True, start_new_session=True,
         )
     finally:
@@ -712,29 +896,133 @@ def start_quick_tunnel(port, label):
             return url
     return None
 
-def show_iframe(port, label, height):
+def start_opencode_tunnel(port=4096):
+    log_path = ROOTS_LOGS / "opencode-tunnel.log"
+    pid_path = ROOTS_STATE / "opencode-tunnel.pid"
+    url_path = ROOTS_STATE / "opencode-tunnel.url"
+    known_hosts = ROOTS_STATE / "localhostrun_known_hosts"
+    stop_pid_file(pid_path)
+    url_path.unlink(missing_ok=True)
+    log_fh = open(log_path, "w")
+    try:
+        proc = subprocess.Popen(
+            [
+                "ssh", "-T",
+                "-o", "ExitOnForwardFailure=yes",
+                "-o", "ServerAliveInterval=30",
+                "-o", "ServerAliveCountMax=3",
+                "-o", "StrictHostKeyChecking=accept-new",
+                "-o", f"UserKnownHostsFile={known_hosts}",
+                "-R", f"80:127.0.0.1:{port}",
+                "nokey@localhost.run",
+            ],
+            stdout=log_fh, stderr=subprocess.STDOUT, text=True, start_new_session=True,
+        )
+    finally:
+        log_fh.close()
+    pid_path.write_text(str(proc.pid))
+    pattern = re.compile(r"(https://[A-Za-z0-9-]+\.lhr\.life(?:[^\s\x1b]*)?)")
+    for _ in range(80):
+        if proc.poll() is not None:
+            break
+        time.sleep(0.5)
+        try:
+            m = pattern.search(log_path.read_text(errors="replace"))
+        except OSError:
+            m = None
+        if m:
+            url = m.group(1).rstrip("/.,);]")
+            url_path.write_text(url)
+            return url
+    stop_pid_file(pid_path)
+    return None
+
+def opencode_headers(accept="application/json"):
+    token = base64.b64encode(f"{OPENCODE_USERNAME}:{PASSWORD}".encode()).decode()
+    return {
+        "Authorization": f"Basic {token}",
+        "x-opencode-directory": str(ROOTS_WORKSPACE),
+        "Accept": accept,
+    }
+
+def data_list(payload):
+    if isinstance(payload, list):
+        return payload
+    if isinstance(payload, dict) and isinstance(payload.get("data"), list):
+        return payload["data"]
+    return []
+
+def probe_opencode_api(base_url, timeout=15):
+    for endpoint, must_have_items in (
+        ("/api/agent", True),
+        ("/api/provider", True),
+        ("/api/model", True),
+        ("/api/session", False),
+    ):
+        try:
+            req = urllib.request.Request(base_url.rstrip("/") + endpoint, headers=opencode_headers())
+            with urllib.request.urlopen(req, timeout=timeout) as response:
+                payload = json.loads(response.read().decode() or "{}")
+                if response.status != 200:
+                    return False, f"{endpoint} HTTP {response.status}"
+                if must_have_items and not data_list(payload):
+                    return False, f"{endpoint} vazio"
+        except Exception as exc:
+            return False, f"{endpoint}: {exc}"
+    return True, None
+
+def probe_opencode_sse(base_url, timeout=12):
+    try:
+        req = urllib.request.Request(
+            base_url.rstrip("/") + "/api/event",
+            headers=opencode_headers("text/event-stream"),
+        )
+        with urllib.request.urlopen(req, timeout=timeout) as response:
+            ctype = (response.headers.get("Content-Type") or "").lower()
+            if response.status != 200 or not ctype.startswith("text/event-stream"):
+                return False, f"HTTP {response.status} content-type={ctype!r}"
+            for _ in range(80):
+                line = response.readline().decode(errors="replace").strip()
+                if line.startswith("data:") or line.startswith("event:"):
+                    return True, None
+            return False, "sem primeiro frame SSE"
+    except Exception as exc:
+        return False, str(exc)
+
+def show_iframe(port, label, height, path="/"):
     try:
         from google.colab import output
         print(f"  ↪ {label}: fallback embutido")
-        output.serve_kernel_port_as_iframe(port, height=height)
+        output.serve_kernel_port_as_iframe(port, path=path, height=height)
     except Exception as e:
         print(f"  ⚠️ {label}: fallback indisponível: {e}")
 
 print("🔄 Verificando links externos…")
 IDE_URL = saved_tunnel("code-server") if listening(8080) else None
 TTYD_URL = saved_tunnel("ttyd") if listening(7681) else None
-OPENCODE_URL = saved_tunnel("opencode") if listening(4096) else None
 
-if ((listening(8080) and not IDE_URL) or
-        (listening(7681) and not TTYD_URL) or
-        (listening(4096) and not OPENCODE_URL)):
-    if ensure_cloudflared():
-        if listening(8080) and not IDE_URL:
-            IDE_URL = start_quick_tunnel(8080, "code-server")
-        if listening(7681) and not TTYD_URL:
-            TTYD_URL = start_quick_tunnel(7681, "ttyd")
-        if listening(4096) and not OPENCODE_URL:
-            OPENCODE_URL = start_quick_tunnel(4096, "opencode")
+if ((listening(8080) and not IDE_URL) or (listening(7681) and not TTYD_URL)) and ensure_cloudflared():
+    if listening(8080) and not IDE_URL:
+        IDE_URL = start_quick_tunnel(8080, "code-server")
+    if listening(7681) and not TTYD_URL:
+        TTYD_URL = start_quick_tunnel(7681, "ttyd")
+
+OPENCODE_PROJECT_SLUG = base64.urlsafe_b64encode(str(ROOTS_WORKSPACE).encode()).decode().rstrip("=")
+OPENCODE_BASE_URL = saved_opencode_tunnel() if listening(4096) else None
+OPENCODE_PROJECT_URL = None
+if listening(4096):
+    if not OPENCODE_BASE_URL:
+        OPENCODE_BASE_URL = start_opencode_tunnel(4096)
+    if OPENCODE_BASE_URL:
+        api_ok, api_error = probe_opencode_api(OPENCODE_BASE_URL)
+        sse_ok, sse_error = probe_opencode_sse(OPENCODE_BASE_URL)
+        if api_ok and sse_ok:
+            OPENCODE_PROJECT_URL = f"{OPENCODE_BASE_URL}/{OPENCODE_PROJECT_SLUG}"
+            (ROOTS_STATE / "opencode-project.url").write_text(OPENCODE_PROJECT_URL)
+        else:
+            print(f"  ⚠️ OpenCode tunnel inválido: API={api_error or 'ok'}; SSE={sse_error or 'ok'}")
+            stop_pid_file(ROOTS_STATE / "opencode-tunnel.pid")
+            OPENCODE_BASE_URL = None
 
 print("=" * 62)
 print("  🌳 Seus links atuais")
@@ -749,12 +1037,12 @@ if TTYD_URL:
 elif listening(7681):
     print("  💻  Terminal: link externo indisponível")
     show_iframe(7681, "Terminal", "360")
-if OPENCODE_URL:
-    print(f"  🤖 OpenCode:\n      {OPENCODE_URL}\n      usuário: {OPENCODE_USERNAME}  senha: {PASSWORD}")
+if OPENCODE_PROJECT_URL:
+    print(f"  🤖 OpenCode:\n      {OPENCODE_PROJECT_URL}\n      usuário: {OPENCODE_USERNAME}  senha: {PASSWORD}")
 elif listening(4096):
-    print("  🤖 OpenCode: link externo indisponível")
-    show_iframe(4096, "OpenCode", "720")
-if not any((IDE_URL, TTYD_URL, OPENCODE_URL, listening(8080), listening(7681), listening(4096))):
+    print("  🤖 OpenCode: link externo SSE indisponível")
+    show_iframe(4096, "OpenCode", "720", "/" + OPENCODE_PROJECT_SLUG)
+if not any((IDE_URL, TTYD_URL, OPENCODE_PROJECT_URL, listening(8080), listening(7681), listening(4096))):
     print("  ⚠️  Os serviços não estão no ar. Se a VM foi reciclada, rode ▶️ INICIAR TUDO.")
 print(f"\n  🔑 Senha: {ROOTS_STATE / 'password'}")
 """
@@ -852,7 +1140,7 @@ def start_tunnel(port):
     return proc, url
 
 print("🌐 Subindo túneis públicos…")
-for name, port in (("IDE", 8080), ("Terminal", 7681), ("OpenCode", 4096)):
+for name, port in (("IDE", 8080), ("Terminal", 7681)):
     if not listening(port):
         print(f"   ⏭️  {name} não está rodando")
         continue
@@ -861,10 +1149,8 @@ for name, port in (("IDE", 8080), ("Terminal", 7681), ("OpenCode", 4096)):
         print(f"  🌐 {name}: {url}")
         if name == "IDE":
             print(f"     senha: {PASSWORD}")
-        elif name == "Terminal":
-            print(f"     usuário: roots  senha: {PASSWORD}")
         else:
-            print(f"     usuário: opencode  senha: {PASSWORD}")
+            print(f"     usuário: roots  senha: {PASSWORD}")
     else:
         print(f"  ⚠️  {name}: não consegui capturar a URL")
 
@@ -907,6 +1193,13 @@ if pf.exists():
 pkill("[c]ode-server")
 pkill("[t]tyd")
 pkill("[o]pencode.*serve")
+try:
+    tunnel_pid = int((ROOTS_STATE / "opencode-tunnel.pid").read_text().strip())
+    os.killpg(os.getpgid(tunnel_pid), signal.SIGTERM)
+except (OSError, ValueError, ProcessLookupError):
+    pass
+(ROOTS_STATE / "opencode-tunnel.pid").unlink(missing_ok=True)
+pkill("[n]okey@localhost.run")
 pkill("[c]loudflared")
 
 # 3) tmux
@@ -935,8 +1228,12 @@ Os Quick Tunnels são temporários e o runtime também pode ter desligado.
 Verifique com 📊 STATUS e rode 🔄 RE-LINK; se os serviços estiverem parados, rode ▶️ INICIAR TUDO.
 
 ### OpenCode pede login
-Use **usuário `opencode`** e a mesma senha impressa pelo START. O OpenCode roda no mesmo
-`/content/workspace` do IDE e do terminal.
+Use **usuário `opencode`** e a mesma senha impressa pelo START. O link gerado já contém
+a rota do projeto `/content/workspace`; RE-LINK também valida API + SSE antes de exibi-lo.
+
+### OpenCode abre, mas models/agents/sessions ficam vazios
+Não use um URL Cloudflare manual para a porta 4096. O OpenCode precisa do contexto do
+workspace e de SSE. Rode 🔄 **RE-LINK** para recriar o túnel compatível e a rota do projeto.
 
 ### "Address already in use" / portas ocupadas
 A célula de START é idempotente: ela limpa processos antigos antes de subir os serviços.
