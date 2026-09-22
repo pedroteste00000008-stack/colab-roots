@@ -219,6 +219,27 @@ class ColabRootsDaemon:
                 "last_stable_at": None,
                 "health_failures": 0,
             },
+            "opencode": {
+                "command": [
+                    str(Path.home() / ".opencode" / "bin" / "opencode"),
+                    "serve", "--hostname", "127.0.0.1", "--port", "4096",
+                ],
+                "enabled": self.config.get("enable_opencode", False),
+                "port": 4096,
+                "restart": True,
+                "status": "stopped",
+                "pid": None,
+                "started_at": None,
+                "restart_count": 0,
+                "last_stable_at": None,
+                "health_failures": 0,
+                "cwd": "/content/workspace",
+                "env": {
+                    "OPENCODE_SERVER_USERNAME": self.config.get("opencode_username", "opencode"),
+                    "OPENCODE_SERVER_PASSWORD": password,
+                    "PATH": f"{Path.home() / '.opencode' / 'bin'}:{os.environ.get('PATH', '')}",
+                },
+            },
             "vscode-tunnel": {
                 "command": [
                     "code-tunnel", "tunnel",
@@ -353,11 +374,16 @@ class ColabRootsDaemon:
             return False
 
         try:
+            service_env = os.environ.copy()
+            service_env.update(svc.get("env", {}))
+            service_cwd = svc.get("cwd") or None
             proc = subprocess.Popen(
                 svc["command"],
                 stdout=log_fh,
                 stderr=subprocess.STDOUT,
                 start_new_session=True,  # Detach from daemon process group
+                env=service_env,
+                cwd=service_cwd,
             )
             self._processes[name] = proc
             self._services.set(name, "pid", proc.pid)
