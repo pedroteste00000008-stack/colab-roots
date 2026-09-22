@@ -94,7 +94,8 @@ def test_access_layer_uses_project_route_and_sse_capable_tunnel():
     assert "nokey@localhost.run" in BUILDER
     assert 'start_quick_tunnel(4096, "opencode")' not in BUILDER
     assert "🤖 OpenCode" in BUILDER
-    assert "usuário: opencode" in BUILDER
+    assert 'OPENCODE_USERNAME = os.environ.get("ROOTS_OPENCODE_USERNAME", "opencode")' in BUILDER
+    assert "usuário: {OPENCODE_USERNAME}" in BUILDER
 
 
 def test_opencode_probe_covers_project_scoped_api_and_sse():
