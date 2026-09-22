@@ -86,11 +86,32 @@ def test_fallback_starts_opencode_with_password_out_of_argv():
     assert 'OPENCODE_SERVER_PASSWORD=' not in BUILDER
 
 
-def test_access_layer_exposes_and_relinks_opencode():
-    assert 'start_quick_tunnel(4096, "opencode")' in BUILDER
-    assert 'saved_tunnel("opencode")' in BUILDER
+def test_access_layer_uses_project_route_and_sse_capable_tunnel():
+    assert "OPENCODE_PROJECT_SLUG" in BUILDER
+    assert "base64.urlsafe_b64encode(str(ROOTS_WORKSPACE).encode())" in BUILDER
+    assert 'OPENCODE_PROJECT_URL = f"{OPENCODE_BASE_URL}/{OPENCODE_PROJECT_SLUG}"' in BUILDER
+    assert "start_opencode_tunnel" in BUILDER
+    assert "nokey@localhost.run" in BUILDER
+    assert 'start_quick_tunnel(4096, "opencode")' not in BUILDER
     assert "🤖 OpenCode" in BUILDER
-    assert "usuário: opencode" in BUILDER
+    assert 'OPENCODE_USERNAME = os.environ.get("ROOTS_OPENCODE_USERNAME", "opencode")' in BUILDER
+    assert "usuário: {OPENCODE_USERNAME}" in BUILDER
+
+
+def test_opencode_probe_covers_project_scoped_api_and_sse():
+    assert '"x-opencode-directory": str(ROOTS_WORKSPACE)' in BUILDER
+    assert '"/api/location"' in BUILDER
+    assert 'location.get("directory") != str(ROOTS_WORKSPACE)' in BUILDER
+    assert '("/api/agent", True)' in BUILDER
+    assert '("/api/provider", False)' in BUILDER
+    assert '("/api/model", False)' in BUILDER
+    assert '("/api/session", False)' in BUILDER
+    assert "/api/event" in BUILDER
+    assert "text/event-stream" in BUILDER
+
+
+def test_manual_cloudflare_cell_does_not_expose_opencode():
+    assert 'for name, port in (("IDE", 8080), ("Terminal", 7681)):' in BUILDER
 
 
 def test_failed_install_does_not_start_missing_opencode():
@@ -105,7 +126,9 @@ if __name__ == "__main__":
         test_daemon_defines_opencode_web_service_on_4096,
         test_daemon_passes_service_env_and_cwd_to_process,
         test_fallback_starts_opencode_with_password_out_of_argv,
-        test_access_layer_exposes_and_relinks_opencode,
+        test_access_layer_uses_project_route_and_sse_capable_tunnel,
+        test_opencode_probe_covers_project_scoped_api_and_sse,
+        test_manual_cloudflare_cell_does_not_expose_opencode,
         test_failed_install_does_not_start_missing_opencode,
     ]
     failures = 0
