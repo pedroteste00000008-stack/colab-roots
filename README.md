@@ -68,8 +68,7 @@ The notebook does everything by itself:
 1. Installs all dependencies
 2. Mounts Google Drive (optional — it *keeps working* if you skip the auth)
 3. Starts the services + daemon
-4. Prints your **IDE**, **Terminal**, and **OpenCode** links — temporary Cloudflare Quick Tunnel URLs that
-   work in your browser (no useless `127.0.0.1` links)
+4. Prints your **IDE**, **Terminal**, and **OpenCode** links. IDE/Terminal use Cloudflare Quick Tunnels; OpenCode uses an SSE-capable localhost.run tunnel and opens the encoded `/content/workspace` project route.
 5. Keeps your VM **alive** (blocking keep-alive loop — close the tab anytime)
 
 ### 3. Connect
@@ -78,8 +77,7 @@ The notebook does everything by itself:
 - **Terminal**: click the Terminal link → user `roots` + printed password
 - **OpenCode Web**: click the OpenCode link → user `opencode` + printed password
 - Re-open links later with the 🔄 **RE-LINK** cell
-- Optional 🌐 **Cloudflare** cell gives public URLs that work from any device
-  without a Google login
+- Optional 🌐 **Cloudflare** cell can recreate IDE/Terminal URLs. OpenCode deliberately uses a separate SSE-capable SSH tunnel.
 
 ### 4. Stop (when you're done)
 
@@ -106,9 +104,9 @@ DRIVE_FOLDER = "colab-roots" # Folder in Google Drive
 |---------|------|---------|-------------|
 | code-server | 8080 | Full VS Code IDE in browser | Quick Tunnel URL + Colab iframe fallback |
 | ttyd | 7681 | Browser terminal | Quick Tunnel URL + Colab iframe fallback |
-| OpenCode | 4096 | OpenCode Web agent UI | Quick Tunnel URL + Colab iframe fallback |
+| OpenCode | 4096 | OpenCode Web agent UI | SSE-capable localhost.run URL + encoded workspace route + Colab iframe fallback |
 | VS Code Tunnel | - | Official VS Code Remote | Via VS Code extension (optional) |
-| Cloudflare | - | Public URLs for IDE, Terminal and OpenCode | `https://<sub>.trycloudflare.com` |
+| Cloudflare | - | Public URLs for IDE and Terminal | `https://<sub>.trycloudflare.com` |
 
 ## Persistence Strategy
 
@@ -196,7 +194,7 @@ roots restart <service>
 
 ### Lost connection
 1. Check if Colab VM is still running (look at the notebook)
-2. If VM is alive, run the 🔄 **RE-LINK** cell to get fresh proxy links
+2. If VM is alive, run the 🔄 **RE-LINK** cell to recreate/revalidate IDE, Terminal, and the project-scoped OpenCode link
 3. If VM is dead, run ▶️ **INICIAR TUDO** again — Drive restores your environment
 
 ### Drive sync failing
@@ -208,3 +206,12 @@ roots logs daemon  # Check daemon logs (sync runs inside the daemon)
 ## License
 
 MIT
+
+### OpenCode remote access contract
+
+OpenCode is not exposed through Cloudflare Quick Tunnel. Its web client depends on project-scoped requests and Server-Sent Events (`/api/event`). Colab Roots therefore:
+- starts OpenCode in `/content/workspace`;
+- validates project-scoped API requests with `x-opencode-directory: /content/workspace`;
+- exposes port 4096 through an SSH reverse tunnel (`localhost.run`) that supports SSE;
+- opens the UI at `/<base64url("/content/workspace")>`;
+- probes `/api/agent`, `/api/provider`, `/api/model`, `/api/session`, and `/api/event` before advertising the external OpenCode link.
