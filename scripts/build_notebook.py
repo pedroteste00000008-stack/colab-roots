@@ -8,8 +8,8 @@ Design goals (average user = zero setup):
 - "Give it play, get your link, close the tab."
 - The START cell does EVERYTHING and ends in a blocking keep-alive loop,
   which keeps the Colab kernel busy -> no idle disconnect.
-- Access links are Colab proxy ports (works from the browser), never raw
-  localhost URLs.
+- External access links use Cloudflare Quick Tunnels; Colab's runtime proxy is
+  used only through the supported in-notebook iframe helper.
 - Re-running cells is idempotent (no duplicate daemons/services/passwords).
 """
 
@@ -55,7 +55,7 @@ C0 = r"""# 🌱 Colab Roots — One-Click Edition 🌳
 - 💻 **Terminal no navegador** com sessão tmux persistente (ttyd)
 - 💾 **Backup automático no Google Drive** — seu trabalho sobrevive a reconexões
 - ❤️ **Keep-alive** — a VM não "dorme" nem desconecta por inatividade
-- 🔗 **Links que funcionam de verdade** no seu navegador (Colab proxy — nada de `localhost` enganoso)
+- 🔗 **Links externos de verdade** via Cloudflare Quick Tunnel (com senha) + fallback embutido do Colab
 
 ---
 
@@ -418,41 +418,105 @@ if ENABLE_CODE_SERVER:
 if ENABLE_TTYD:
     print("   " + ("✅ ttyd :7681" if wait_port(7681, 90) else "❌ ttyd falhou"))
 
-# ━━━ 8/8 Links de acesso (Colab proxy — FUNCIONAM!) ━━━━━━
-print("\n⏳ gerando seus links de acesso…")
+# ━━━ 8/8 Acesso (links externos reais + fallback Colab) ━━━━━━
+print("\n⏳ criando links externos de acesso…")
+import re, shutil, signal
+
+def ensure_cloudflared():
+    if shutil.which("cloudflared"):
+        return True
+    print("   📦 instalando cloudflared…")
+    r = subprocess.run(
+        "wget -q https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 "
+        "-O /usr/local/bin/cloudflared && chmod +x /usr/local/bin/cloudflared",
+        shell=True, capture_output=True, text=True,
+    )
+    if r.returncode != 0:
+        print(f"   ⚠️ cloudflared não instalou: {(r.stderr or '')[:300]}")
+        return False
+    return shutil.which("cloudflared") is not None
+
+def start_quick_tunnel(port, label):
+    log_path = ROOTS_LOGS / f"cloudflared-{label}.log"
+    pid_path = ROOTS_STATE / f"cloudflare-{label}.pid"
+    url_path = ROOTS_STATE / f"cloudflare-{label}.url"
+    url_path.unlink(missing_ok=True)
+    log_fh = open(log_path, "w")
+    try:
+        proc = subprocess.Popen(
+            ["cloudflared", "tunnel", "--url", f"http://127.0.0.1:{port}", "--no-autoupdate"],
+            stdout=log_fh, stderr=subprocess.STDOUT, text=True, start_new_session=True,
+        )
+    finally:
+        log_fh.close()
+    pid_path.write_text(str(proc.pid))
+    pattern = re.compile(r"(https://[a-zA-Z0-9-]+\.trycloudflare\.com)")
+    for _ in range(60):
+        if proc.poll() is not None:
+            break
+        time.sleep(0.5)
+        try:
+            m = pattern.search(log_path.read_text(errors="replace"))
+        except OSError:
+            m = None
+        if m:
+            url = m.group(1).rstrip("/")
+            url_path.write_text(url)
+            return url
+    tail = ""
+    try:
+        tail = "\n".join(log_path.read_text(errors="replace").splitlines()[-8:])
+    except OSError:
+        pass
+    print(f"   ⚠️ tunnel {label} não gerou URL" + (f":\n{tail}" if tail else ""))
+    return None
+
+def show_colab_iframe(port, label, height):
+    try:
+        from google.colab import output
+        print(f"   ↪ {label}: usando acesso embutido suportado pelo Colab")
+        output.serve_kernel_port_as_iframe(port, height=height)
+        return True
+    except Exception as e:
+        print(f"   ⚠️ fallback embutido {label} indisponível: {e}")
+        return False
+
+# proxyPort() cru não é um link público estável. Quick Tunnel é o link externo.
+sh("pkill -f '[c]loudflared' 2>/dev/null || true")
+for stale in ROOTS_STATE.glob("cloudflare-*.url"):
+    stale.unlink(missing_ok=True)
+for stale in ROOTS_STATE.glob("cloudflare-*.pid"):
+    stale.unlink(missing_ok=True)
+
 IDE_URL = TTYD_URL = None
-try:
-    from google.colab import output
-    if ENABLE_CODE_SERVER:
-        try:
-            IDE_URL = output.eval_js("google.colab.kernel.proxyPort(8080)")
-        except Exception:
-            IDE_URL = None
-    if ENABLE_TTYD:
-        try:
-            TTYD_URL = output.eval_js("google.colab.kernel.proxyPort(7681)")
-        except Exception:
-            TTYD_URL = None
-except Exception:
-    pass
+if ensure_cloudflared():
+    if ENABLE_CODE_SERVER and listening(8080):
+        IDE_URL = start_quick_tunnel(8080, "code-server")
+    if ENABLE_TTYD and listening(7681):
+        TTYD_URL = start_quick_tunnel(7681, "ttyd")
 
 print()
 print("=" * 62)
-print("  🌳 COLAB ROOTS ESTÁ NO AR — seus links")
+print("  🌳 COLAB ROOTS ESTÁ NO AR — acesso")
 print("=" * 62)
 if IDE_URL:
     print(f"  🖥️  IDE (VS Code):\n      {IDE_URL}\n      senha: {PASSWORD}")
+elif ENABLE_CODE_SERVER and listening(8080):
+    print("  🖥️  IDE: sem link externo; abrindo fallback dentro do notebook abaixo")
+    show_colab_iframe(8080, "IDE", "720")
 if TTYD_URL:
     print(f"  💻  Terminal:\n      {TTYD_URL}\n      usuário: {USERNAME}   senha: {PASSWORD}")
+elif ENABLE_TTYD and listening(7681):
+    print("  💻  Terminal: sem link externo; abrindo fallback dentro do notebook abaixo")
+    show_colab_iframe(7681, "Terminal", "360")
 if not (IDE_URL or TTYD_URL):
-    print("  ⚠️  Links de proxy indisponíveis agora.")
-    print("      Fallback manual: Runtime ▸ View ▸ Ports, adicione 8080 (+7681) e abra essas URLs.")
+    print("  ⚠️  Nenhum link externo foi criado. Use os iframes acima ou rode 🔄 RE-LINK.")
 print(f"  🔑  Senha também salva em: {ROOTS_STATE / 'password'}")
 print(f"  🛠️  Gerenciar com:          {ROOTS_BIN}/roots status")
 if DRIVE_PATH:
     print(f"  ☁️  Backup no Drive:        {DRIVE_PATH}")
-print("  📌  Os links funcionam do seu navegador enquanto a VM estiver viva.")
-print("      Reabra depois com a célula 🔄 RE-LINK.")
+print("  🔒  Os URLs trycloudflare.com são públicos, mas IDE/terminal continuam protegidos pela senha.")
+print("      Reabra/renove depois com a célula 🔄 RE-LINK.")
 print("=" * 62)
 
 # ━━━ 💓 Keep-alive (bloqueia de propósito) ━━━━━━━━━━━━━━━
@@ -485,41 +549,46 @@ except KeyboardInterrupt:
 # ─────────────────────────────────────────────────────────────────────
 C5 = r"""## 🔗 Seus links & como funciona
 
-### Os links que o START imprimiu
-São URLs **Colab proxy** (`…colab.googleusercontent.com`). Elas funcionam de verdade
-no seu navegador — diferente de `http://127.0.0.1:8080`, que **não** funciona fora da VM.
+### Links externos
+O START agora cria URLs temporárias `https://*.trycloudflare.com` para o IDE e
+o Terminal. Esses são túneis HTTP reais e podem ser abertos em outra aba ou
+dispositivo enquanto a VM estiver viva.
 
-- Abra o **link do IDE** → entre com a senha mostrada → VS Code completo no navegador
-- Abra o **link do Terminal** → usuário `roots` + senha → terminal com tmux persistente
-- A senha completa fica salva também em `~/.colab-roots/state/password`
+- **IDE** → senha mostrada pelo START
+- **Terminal** → usuário `roots` + a mesma senha
+- Os links são públicos na Internet, mas os serviços continuam protegidos pela senha.
+
+### Por que não usamos mais o URL `*.prod.colab.dev`?
+`google.colab.kernel.proxyPort()` é um proxy interno do frontend do Colab.
+Abrir o origin retornado como uma URL externa comum pode resultar em 404 e o
+helper oficial para nova janela está deprecated. Quando o túnel externo falha,
+o notebook usa `serve_kernel_port_as_iframe()`, que é o caminho suportado
+para acesso dentro do próprio Colab.
 
 ### O que acontece quando você fecha a aba?
-Nada. Os processos (services + daemon) rodam na VM, não na aba.
-Só a célula de START continua "rodando" para manter a VM acordada.
+Os serviços e os túneis rodam na VM. A célula START continua executando o
+keep-alive.
 
 ### Perdi o link / fechei a aba / reconectou
-Se a VM ainda está viva (o notebook continua aberto ou reconectou), rode:
-- 🔄 **RE-LINK** — gera os links de novo (sem reinstalar nada)
-- 📊 **STATUS** — vê o que está rodando e o heartbeat
+Se a VM ainda está viva, rode:
+- 🔄 **RE-LINK** — reutiliza ou recria os Quick Tunnels sem reinstalar tudo
+- 📊 **STATUS** — mostra serviços e heartbeat
 
 ### Como parar de vez?
-1. Aperte ■ (stop) na célula de START para parar o keep-alive
-2. Rode a célula 🛑 **PARAR** (mata serviços, daemon e tmux)
-3. Ou simplesmente: **Runtime ▸ Disconnect & delete runtime**
-
-### A VM foi reciclada (sem conexão)?
-VM do Colab grátis é reciclada depois de muito tempo parada.
-É só rodar **▶️ INICIAR TUDO** de novo — o Drive restaura seu ambiente.
+1. Aperte ■ na célula START
+2. Rode 🛑 **PARAR**
+3. Ou use **Runtime ▸ Disconnect & delete runtime**
 """
 
 # ─────────────────────────────────────────────────────────────────────
 # CELL 6 — Re-link
 # ─────────────────────────────────────────────────────────────────────
-C6 = r"""#@title 🔄 RE-LINK (gerar links de novo, sem reinstalar){display-mode:"form"}
-import os, time, socket
+C6 = r"""#@title 🔄 RE-LINK (reutilizar/recriar links externos){display-mode:"form"}
+import os, time, socket, subprocess, re, shutil
 from pathlib import Path
 
 ROOTS_HOME  = Path(os.environ.get("ROOTS_HOME", str(Path.home() / ".colab-roots")))
+ROOTS_LOGS  = ROOTS_HOME / "logs"
 ROOTS_STATE = ROOTS_HOME / "state"
 PASSWORD = (ROOTS_STATE / "password").read_text().strip() if (ROOTS_STATE / "password").exists() else ""
 USERNAME = os.environ.get("ROOTS_USERNAME", "roots")
@@ -530,27 +599,94 @@ def listening(port):
     except OSError:
         return False
 
-print("🔄 Re-gerando links…")
-IDE_URL = TTYD_URL = None
-try:
-    from google.colab import output
-    if listening(8080):
-        IDE_URL = output.eval_js("google.colab.kernel.proxyPort(8080)")
-    if listening(7681):
-        TTYD_URL = output.eval_js("google.colab.kernel.proxyPort(7681)")
-except Exception:
-    pass
+def pid_alive(path):
+    try:
+        os.kill(int(path.read_text().strip()), 0)
+        return True
+    except (OSError, ValueError):
+        return False
+
+def saved_tunnel(label):
+    pid_path = ROOTS_STATE / f"cloudflare-{label}.pid"
+    url_path = ROOTS_STATE / f"cloudflare-{label}.url"
+    if pid_path.exists() and url_path.exists() and pid_alive(pid_path):
+        url = url_path.read_text().strip()
+        if url.startswith("https://") and ".trycloudflare.com" in url:
+            return url
+    return None
+
+def ensure_cloudflared():
+    if shutil.which("cloudflared"):
+        return True
+    r = subprocess.run(
+        "wget -q https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 "
+        "-O /usr/local/bin/cloudflared && chmod +x /usr/local/bin/cloudflared",
+        shell=True, capture_output=True, text=True,
+    )
+    return r.returncode == 0 and shutil.which("cloudflared") is not None
+
+def start_quick_tunnel(port, label):
+    log_path = ROOTS_LOGS / f"cloudflared-{label}.log"
+    pid_path = ROOTS_STATE / f"cloudflare-{label}.pid"
+    url_path = ROOTS_STATE / f"cloudflare-{label}.url"
+    log_fh = open(log_path, "w")
+    try:
+        proc = subprocess.Popen(
+            ["cloudflared", "tunnel", "--url", f"http://127.0.0.1:{port}", "--no-autoupdate"],
+            stdout=log_fh, stderr=subprocess.STDOUT, text=True, start_new_session=True,
+        )
+    finally:
+        log_fh.close()
+    pid_path.write_text(str(proc.pid))
+    pattern = re.compile(r"(https://[a-zA-Z0-9-]+\.trycloudflare\.com)")
+    for _ in range(60):
+        if proc.poll() is not None:
+            break
+        time.sleep(0.5)
+        try:
+            m = pattern.search(log_path.read_text(errors="replace"))
+        except OSError:
+            m = None
+        if m:
+            url = m.group(1).rstrip("/")
+            url_path.write_text(url)
+            return url
+    return None
+
+def show_iframe(port, label, height):
+    try:
+        from google.colab import output
+        print(f"  ↪ {label}: fallback embutido")
+        output.serve_kernel_port_as_iframe(port, height=height)
+    except Exception as e:
+        print(f"  ⚠️ {label}: fallback indisponível: {e}")
+
+print("🔄 Verificando links externos…")
+IDE_URL = saved_tunnel("code-server") if listening(8080) else None
+TTYD_URL = saved_tunnel("ttyd") if listening(7681) else None
+
+if (listening(8080) and not IDE_URL) or (listening(7681) and not TTYD_URL):
+    if ensure_cloudflared():
+        if listening(8080) and not IDE_URL:
+            IDE_URL = start_quick_tunnel(8080, "code-server")
+        if listening(7681) and not TTYD_URL:
+            TTYD_URL = start_quick_tunnel(7681, "ttyd")
 
 print("=" * 62)
 print("  🌳 Seus links atuais")
 print("=" * 62)
 if IDE_URL:
     print(f"  🖥️  IDE:\n      {IDE_URL}\n      senha: {PASSWORD}")
+elif listening(8080):
+    print("  🖥️  IDE: link externo indisponível")
+    show_iframe(8080, "IDE", "720")
 if TTYD_URL:
     print(f"  💻  Terminal:\n      {TTYD_URL}\n      usuário: {USERNAME}  senha: {PASSWORD}")
-if not (IDE_URL or TTYD_URL):
-    print("\n  ⚠️  Parece que os serviços não estão no ar.")
-    print("      Se a VM foi reciclada, rode ▶️ INICIAR TUDO de novo.")
+elif listening(7681):
+    print("  💻  Terminal: link externo indisponível")
+    show_iframe(7681, "Terminal", "360")
+if not any((IDE_URL, TTYD_URL, listening(8080), listening(7681))):
+    print("  ⚠️  Os serviços não estão no ar. Se a VM foi reciclada, rode ▶️ INICIAR TUDO.")
 print(f"\n  🔑 Senha: {ROOTS_STATE / 'password'}")
 """
 
@@ -623,7 +759,8 @@ ROOTS_HOME  = Path(os.environ.get("ROOTS_HOME", str(Path.home() / ".colab-roots"
 ROOTS_STATE = ROOTS_HOME / "state"
 PASSWORD = (ROOTS_STATE / "password").read_text().strip() if (ROOTS_STATE / "password").exists() else ""
 
-if subprocess.run(["command", "-v", "cloudflared"], capture_output=True).returncode != 0:
+import shutil
+if shutil.which("cloudflared") is None:
     print("📦 Instalando cloudflared…")
     subprocess.run("wget -q https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 -O /usr/local/bin/cloudflared && chmod +x /usr/local/bin/cloudflared", shell=True)
 
