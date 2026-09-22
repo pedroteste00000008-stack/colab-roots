@@ -100,8 +100,12 @@ def test_access_layer_uses_project_route_and_sse_capable_tunnel():
 
 def test_opencode_probe_covers_project_scoped_api_and_sse():
     assert '"x-opencode-directory": str(ROOTS_WORKSPACE)' in BUILDER
-    for endpoint in ("/api/agent", "/api/provider", "/api/model", "/api/session"):
-        assert endpoint in BUILDER
+    assert '"/api/location"' in BUILDER
+    assert 'location.get("directory") != str(ROOTS_WORKSPACE)' in BUILDER
+    assert '("/api/agent", True)' in BUILDER
+    assert '("/api/provider", False)' in BUILDER
+    assert '("/api/model", False)' in BUILDER
+    assert '("/api/session", False)' in BUILDER
     assert "/api/event" in BUILDER
     assert "text/event-stream" in BUILDER
 
