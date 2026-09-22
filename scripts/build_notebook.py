@@ -604,12 +604,13 @@ except KeyboardInterrupt:
 C5 = r"""## 🔗 Seus links & como funciona
 
 ### Links externos
-O START agora cria URLs temporárias `https://*.trycloudflare.com` para o IDE e
-o Terminal. Esses são túneis HTTP reais e podem ser abertos em outra aba ou
-dispositivo enquanto a VM estiver viva.
+O START agora cria URLs temporárias `https://*.trycloudflare.com` para o IDE,
+Terminal e OpenCode. Esses são túneis HTTP reais e podem ser abertos em outra
+aba ou dispositivo enquanto a VM estiver viva.
 
 - **IDE** → senha mostrada pelo START
 - **Terminal** → usuário `roots` + a mesma senha
+- **OpenCode** → usuário `opencode` + a mesma senha
 - Os links são públicos na Internet, mas os serviços continuam protegidos pela senha.
 
 ### Por que não usamos mais o URL `*.prod.colab.dev`?
@@ -809,11 +810,10 @@ except Exception:
 # ─────────────────────────────────────────────────────────────────────
 # CELL 8 — Public URL (Cloudflare) intro + cell
 # ─────────────────────────────────────────────────────────────────────
-C8 = r"""## 🌐 URL pública (Cloudflare) — opcional
+C8 = r"""## 🌐 Recriar URLs públicas (Cloudflare) — opcional
 
-Os links do IDE/Terminal exigem que você esteja logado na conta Google do notebook.
-Se quiser acessar de **qualquer dispositivo, sem login Google**, rode a célula abaixo
-(gera URLs públicas temporárias `trycloudflare.com`).
+O START já cria URLs públicas temporárias para IDE, Terminal e OpenCode.
+Use esta célula apenas se quiser abrir túneis extras/novos sem reiniciar os serviços.
 """
 
 C9 = r"""#@title 🌐 URL PÚBLICA via Cloudflare{display-mode:"form"}
@@ -927,8 +927,13 @@ Se passar de 10 min no mesmo passo, o Colab pode ter caído: rode a célula de n
 Normal na primeira vez. Se recusar, o notebook **continua sem backup** — tudo o resto funciona.
 Para reconectar o Drive depois: `from google.colab import drive; drive.mount('/content/drive', force_remount=True)`
 
-### Links do proxy não abrem depois de um tempo
-O runtime pode ter desligado (12h ou inatividade). Verifique com 📊 STATUS e, se preciso, rode ▶️ INICIAR TUDO.
+### Links públicos não abrem depois de um tempo
+Os Quick Tunnels são temporários e o runtime também pode ter desligado.
+Verifique com 📊 STATUS e rode 🔄 RE-LINK; se os serviços estiverem parados, rode ▶️ INICIAR TUDO.
+
+### OpenCode pede login
+Use **usuário `opencode`** e a mesma senha impressa pelo START. O OpenCode roda no mesmo
+`/content/workspace` do IDE e do terminal.
 
 ### "Address already in use" / portas ocupadas
 A célula de START é idempotente: ela limpa processos antigos antes de subir os serviços.
