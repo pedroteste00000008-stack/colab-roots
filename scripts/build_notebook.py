@@ -609,10 +609,23 @@ def data_list(payload):
 
 def probe_opencode_api(base_url, timeout=15):
     counts = {}
+    try:
+        req = urllib.request.Request(base_url.rstrip("/") + "/api/location", headers=opencode_headers())
+        with urllib.request.urlopen(req, timeout=timeout) as response:
+            location_payload = json.loads(response.read().decode() or "{}")
+            if response.status != 200:
+                return False, counts, f"/api/location HTTP {response.status}"
+            location = location_payload.get("location", location_payload) if isinstance(location_payload, dict) else {}
+            if location.get("directory") != str(ROOTS_WORKSPACE):
+                return False, counts, f"/api/location workspace inesperado: {location.get('directory')!r}"
+            counts["/api/location"] = 1
+    except Exception as exc:
+        return False, counts, f"/api/location: {exc}"
+
     for endpoint, must_have_items in (
         ("/api/agent", True),
-        ("/api/provider", True),
-        ("/api/model", True),
+        ("/api/provider", False),
+        ("/api/model", False),
         ("/api/session", False),
     ):
         try:
@@ -953,10 +966,22 @@ def data_list(payload):
     return []
 
 def probe_opencode_api(base_url, timeout=15):
+    try:
+        req = urllib.request.Request(base_url.rstrip("/") + "/api/location", headers=opencode_headers())
+        with urllib.request.urlopen(req, timeout=timeout) as response:
+            location_payload = json.loads(response.read().decode() or "{}")
+            if response.status != 200:
+                return False, f"/api/location HTTP {response.status}"
+            location = location_payload.get("location", location_payload) if isinstance(location_payload, dict) else {}
+            if location.get("directory") != str(ROOTS_WORKSPACE):
+                return False, f"/api/location workspace inesperado: {location.get('directory')!r}"
+    except Exception as exc:
+        return False, f"/api/location: {exc}"
+
     for endpoint, must_have_items in (
         ("/api/agent", True),
-        ("/api/provider", True),
-        ("/api/model", True),
+        ("/api/provider", False),
+        ("/api/model", False),
         ("/api/session", False),
     ):
         try:
