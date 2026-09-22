@@ -759,7 +759,8 @@ ROOTS_HOME  = Path(os.environ.get("ROOTS_HOME", str(Path.home() / ".colab-roots"
 ROOTS_STATE = ROOTS_HOME / "state"
 PASSWORD = (ROOTS_STATE / "password").read_text().strip() if (ROOTS_STATE / "password").exists() else ""
 
-import shutil\nif shutil.which("cloudflared") is None:
+import shutil
+if shutil.which("cloudflared") is None:
     print("📦 Instalando cloudflared…")
     subprocess.run("wget -q https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 -O /usr/local/bin/cloudflared && chmod +x /usr/local/bin/cloudflared", shell=True)
 
