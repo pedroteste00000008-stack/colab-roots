@@ -4,7 +4,7 @@
 
 > **Security:** ver `docs/SECURITY.md`. Testes adversariais em `tests/test_daemon_hardening.py` (`python3 tests/test_daemon_hardening.py`).
 
-Colab Roots transforms a disposable Colab runtime into a persistent, reconnectable development environment with a full IDE, terminal, service daemon, and automatic data persistence.
+Colab Roots transforms a disposable Colab runtime into a persistent, reconnectable development environment with a full IDE, terminal, OpenCode Web, service daemon, and automatic data persistence.
 
 ## Why Colab Roots?
 
@@ -68,7 +68,7 @@ The notebook does everything by itself:
 1. Installs all dependencies
 2. Mounts Google Drive (optional — it *keeps working* if you skip the auth)
 3. Starts the services + daemon
-4. Prints your **IDE link** and **Terminal link** — real Colab proxy URLs that
+4. Prints your **IDE**, **Terminal**, and **OpenCode** links — temporary Cloudflare Quick Tunnel URLs that
    work in your browser (no useless `127.0.0.1` links)
 5. Keeps your VM **alive** (blocking keep-alive loop — close the tab anytime)
 
@@ -76,6 +76,7 @@ The notebook does everything by itself:
 
 - **Browser IDE**: click the IDE link → enter the printed password
 - **Terminal**: click the Terminal link → user `roots` + printed password
+- **OpenCode Web**: click the OpenCode link → user `opencode` + printed password
 - Re-open links later with the 🔄 **RE-LINK** cell
 - Optional 🌐 **Cloudflare** cell gives public URLs that work from any device
   without a Google login
@@ -93,6 +94,7 @@ WORKSPACE_REPO = ""          # Git repo to clone (optional)
 WORKSPACE_BRANCH = "main"    # Branch/tag/ref
 ENABLE_CODE_SERVER = True    # Browser IDE
 ENABLE_TTYD = True           # Browser terminal
+ENABLE_OPENCODE = True        # OpenCode Web on port 4096
 ENABLE_VSCODE_TUNNEL = False # VS Code Remote Tunnel (needs MS/GitHub login)
 PERSIST_TO_DRIVE = True      # Auto-sync to Google Drive
 DRIVE_FOLDER = "colab-roots" # Folder in Google Drive
@@ -102,10 +104,11 @@ DRIVE_FOLDER = "colab-roots" # Folder in Google Drive
 
 | Service | Port | Purpose | URL Pattern |
 |---------|------|---------|-------------|
-| code-server | 8080 | Full VS Code IDE in browser | Colab proxy link printed by notebook |
-| ttyd | 7681 | Browser terminal | Colab proxy link printed by notebook |
+| code-server | 8080 | Full VS Code IDE in browser | Quick Tunnel URL + Colab iframe fallback |
+| ttyd | 7681 | Browser terminal | Quick Tunnel URL + Colab iframe fallback |
+| OpenCode | 4096 | OpenCode Web agent UI | Quick Tunnel URL + Colab iframe fallback |
 | VS Code Tunnel | - | Official VS Code Remote | Via VS Code extension (optional) |
-| Cloudflare | - | Public URLs, any device | `https://<sub>.trycloudflare.com` (optional cell) |
+| Cloudflare | - | Public URLs for IDE, Terminal and OpenCode | `https://<sub>.trycloudflare.com` |
 
 ## Persistence Strategy
 
