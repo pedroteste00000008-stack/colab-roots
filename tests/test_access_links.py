@@ -39,12 +39,18 @@ def test_relink_uses_tunnel_state_not_raw_proxy_origin():
     assert "saved_tunnel" in BUILDER
 
 
+def test_quick_tunnel_regex_matches_real_cloudflare_urls():
+    expected = 'pattern = re.compile(r"(https://[a-zA-Z0-9-]+\\.trycloudflare\\.com)")'
+    assert expected in BUILDER, "Quick Tunnel URL regex is over-escaped and would never capture the URL"
+
+
 if __name__ == "__main__":
     tests = [
         test_start_does_not_print_raw_proxyport_url,
         test_start_has_supported_colab_iframe_fallback,
         test_start_generates_real_external_tunnel_urls,
         test_relink_uses_tunnel_state_not_raw_proxy_origin,
+        test_quick_tunnel_regex_matches_real_cloudflare_urls,
     ]
     failures = 0
     for test in tests:
