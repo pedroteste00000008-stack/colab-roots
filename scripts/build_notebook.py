@@ -450,7 +450,7 @@ def start_quick_tunnel(port, label):
     finally:
         log_fh.close()
     pid_path.write_text(str(proc.pid))
-    pattern = re.compile(r"(https://[a-zA-Z0-9-]+\\.trycloudflare\\.com)")
+    pattern = re.compile(r"(https://[a-zA-Z0-9-]+\.trycloudflare\.com)")
     for _ in range(60):
         if proc.poll() is not None:
             break
@@ -638,7 +638,7 @@ def start_quick_tunnel(port, label):
     finally:
         log_fh.close()
     pid_path.write_text(str(proc.pid))
-    pattern = re.compile(r"(https://[a-zA-Z0-9-]+\\.trycloudflare\\.com)")
+    pattern = re.compile(r"(https://[a-zA-Z0-9-]+\.trycloudflare\.com)")
     for _ in range(60):
         if proc.poll() is not None:
             break
