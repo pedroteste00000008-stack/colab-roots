@@ -93,6 +93,11 @@ def test_access_layer_exposes_and_relinks_opencode():
     assert "usuário: opencode" in BUILDER
 
 
+def test_failed_install_does_not_start_missing_opencode():
+    assert "OPENCODE_READY" in BUILDER
+    assert "if ENABLE_OPENCODE and OPENCODE_READY and not listening(4096):" in BUILDER
+
+
 if __name__ == "__main__":
     tests = [
         test_notebook_enables_opencode_by_default,
@@ -101,6 +106,7 @@ if __name__ == "__main__":
         test_daemon_passes_service_env_and_cwd_to_process,
         test_fallback_starts_opencode_with_password_out_of_argv,
         test_access_layer_exposes_and_relinks_opencode,
+        test_failed_install_does_not_start_missing_opencode,
     ]
     failures = 0
     for test in tests:
