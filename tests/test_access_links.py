@@ -35,8 +35,8 @@ def test_start_generates_real_external_tunnel_urls():
 
 
 def test_relink_uses_tunnel_state_not_raw_proxy_origin():
-    assert "cloudflare-code-server.url" in BUILDER
-    assert "cloudflare-ttyd.url" in BUILDER
+    assert 'f"cloudflare-{label}.url"' in BUILDER
+    assert "saved_tunnel" in BUILDER
 
 
 if __name__ == "__main__":
