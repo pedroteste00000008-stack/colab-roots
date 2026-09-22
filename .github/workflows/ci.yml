@@ -29,6 +29,9 @@ jobs:
       - name: Run daemon hardening tests
         run: python3 tests/test_daemon_hardening.py
 
+      - name: Run access-link regression tests
+        run: python3 tests/test_access_links.py
+
       - name: Rebuild notebook from source of truth
         run: python3 scripts/build_notebook.py
 
