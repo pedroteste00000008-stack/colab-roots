@@ -38,7 +38,8 @@ def test_notebook_enables_opencode_by_default():
 
 def test_notebook_installs_current_opencode_v2():
     assert "https://opencode.ai/v2/install" in BUILDER
-    assert ".opencode/bin" in BUILDER
+    assert 'OPENCODE_BIN_DIR = Path.home() / ".opencode" / "bin"' in BUILDER
+    assert 'os.environ["PATH"] = f"{OPENCODE_BIN_DIR}' in BUILDER
 
 
 def test_daemon_defines_opencode_web_service_on_4096():
