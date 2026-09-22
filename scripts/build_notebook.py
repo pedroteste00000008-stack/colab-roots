@@ -264,6 +264,7 @@ if ENABLE_TTYD:
 # ━━━ 4/9 OpenCode Web ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 OPENCODE_BIN_DIR = Path.home() / ".opencode" / "bin"
 os.environ["PATH"] = f"{OPENCODE_BIN_DIR}:{os.environ.get('PATH', '')}"
+OPENCODE_READY = False
 if ENABLE_OPENCODE:
     print("📦 [4/9] OpenCode…")
     if sh("command -v opencode").returncode != 0:
@@ -271,8 +272,8 @@ if ENABLE_OPENCODE:
         if install.returncode != 0:
             print(f"   ⚠️ instalação do OpenCode falhou: {(install.stderr or '')[:300]}")
     os.environ["PATH"] = f"{OPENCODE_BIN_DIR}:{os.environ.get('PATH', '')}"
-    ok = sh("command -v opencode").returncode == 0
-    print("   ✅ ok" if ok else "   ❌ OpenCode não instalado")
+    OPENCODE_READY = sh("command -v opencode").returncode == 0
+    print("   ✅ ok" if OPENCODE_READY else "   ❌ OpenCode não instalado — seguindo sem ele")
 
 # ━━━ 5/9 VS Code Remote Tunnel (opcional) ━━━━━━━━━━━━━━━━
 if ENABLE_VSCODE_TUNNEL:
@@ -418,7 +419,7 @@ if DAEMON_AVAILABLE:
         "ROOTS_DRIVE_PATH": DRIVE_PATH,
         "ROOTS_ENABLE_CODE_SERVER": str(ENABLE_CODE_SERVER),
         "ROOTS_ENABLE_TTYD": str(ENABLE_TTYD),
-        "ROOTS_ENABLE_OPENCODE": str(ENABLE_OPENCODE),
+        "ROOTS_ENABLE_OPENCODE": str(ENABLE_OPENCODE and OPENCODE_READY),
         "ROOTS_OPENCODE_USERNAME": OPENCODE_USERNAME,
         "ROOTS_ENABLE_VSCODE_TUNNEL": str(ENABLE_VSCODE_TUNNEL),
         "ROOTS_PERSIST_TO_DRIVE": str(PERSIST_TO_DRIVE),
@@ -436,7 +437,7 @@ else:
         sh(f"nohup code-server --bind-addr 127.0.0.1:8080 --auth password --password-file '{ROOTS_STATE/'code-server-pw'}' --disable-telemetry --disable-update-check {ROOTS_WORKSPACE} > {ROOTS_LOGS}/code-server.log 2>&1 & echo $! > {ROOTS_STATE}/code-server.pid")
     if ENABLE_TTYD and not listening(7681):
         sh(f"nohup ttyd -p 7681 -W -c '{USERNAME}:{PASSWORD}' tmux attach -t roots > {ROOTS_LOGS}/ttyd.log 2>&1 & echo $! > {ROOTS_STATE}/ttyd.pid")
-    if ENABLE_OPENCODE and not listening(4096):
+    if ENABLE_OPENCODE and OPENCODE_READY and not listening(4096):
         opencode_env = os.environ.copy()
         opencode_env.update({
             "OPENCODE_SERVER_USERNAME": OPENCODE_USERNAME,
@@ -462,8 +463,10 @@ if ENABLE_CODE_SERVER:
     print("   " + ("✅ code-server :8080" if wait_port(8080, 90) else "❌ code-server falhou"))
 if ENABLE_TTYD:
     print("   " + ("✅ ttyd :7681" if wait_port(7681, 90) else "❌ ttyd falhou"))
-if ENABLE_OPENCODE:
+if ENABLE_OPENCODE and OPENCODE_READY:
     print("   " + ("✅ OpenCode :4096" if wait_port(4096, 90) else "❌ OpenCode falhou"))
+elif ENABLE_OPENCODE:
+    print("   ⏭️  OpenCode indisponível porque a instalação falhou")
 
 # ━━━ 9/9 Acesso (links externos reais + fallback Colab) ━━━━━━
 print("\n⏳ criando links externos de acesso…")
@@ -541,7 +544,7 @@ if ensure_cloudflared():
         IDE_URL = start_quick_tunnel(8080, "code-server")
     if ENABLE_TTYD and listening(7681):
         TTYD_URL = start_quick_tunnel(7681, "ttyd")
-    if ENABLE_OPENCODE and listening(4096):
+    if ENABLE_OPENCODE and OPENCODE_READY and listening(4096):
         OPENCODE_URL = start_quick_tunnel(4096, "opencode")
 
 print()
