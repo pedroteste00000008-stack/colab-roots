@@ -32,6 +32,9 @@ jobs:
       - name: Run access-link regression tests
         run: python3 tests/test_access_links.py
 
+      - name: Run OpenCode integration tests
+        run: python3 tests/test_opencode_integration.py
+
       - name: Rebuild notebook from source of truth
         run: python3 scripts/build_notebook.py
 
